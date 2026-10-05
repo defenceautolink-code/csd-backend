@@ -22,6 +22,8 @@ class Lead extends Model
         'vehicle_segment',
         'brand_id',
         'brand_name',
+        'model_id',
+        'variant_id',
         'model_variant',
         'priority',
         'purchase_timeline',
@@ -83,6 +85,38 @@ class Lead extends Model
     }
 
     /**
+     * Relationship: Lead belongs to a Vehicle Model
+     */
+    public function vehicleModel()
+    {
+        return $this->belongsTo(VehicleModel::class, 'model_id');
+    }
+
+    /**
+     * Relationship alias: model
+     */
+    public function model()
+    {
+        return $this->belongsTo(VehicleModel::class, 'model_id');
+    }
+
+    /**
+     * Relationship: Lead belongs to a Vehicle Variant
+     */
+    public function variant()
+    {
+        return $this->belongsTo(VehicleVariant::class, 'variant_id');
+    }
+
+    /**
+     * Relationship alias: vehicleVariant
+     */
+    public function vehicleVariant()
+    {
+        return $this->belongsTo(VehicleVariant::class, 'variant_id');
+    }
+
+    /**
      * Relationship: Lead belongs to a Lead Source
      */
     public function source()
@@ -102,6 +136,14 @@ class Lead extends Model
      * Relationship: Lead assigned to a User
      */
     public function assignedUser()
+    {
+        return $this->belongsTo(User::class, 'assigned_to');
+    }
+
+    /**
+     * Relationship alias: assigned_user
+     */
+    public function assigned_user()
     {
         return $this->belongsTo(User::class, 'assigned_to');
     }

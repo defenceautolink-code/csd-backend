@@ -23,7 +23,7 @@ class QuotationController extends Controller
     {
         $user = auth()->user();
 
-        $lead = Lead::with(['brand', 'source', 'status', 'assignedUser'])->find($lead_id);
+        $lead = Lead::with(['brand', 'model', 'variant', 'source', 'status', 'assignedUser'])->find($lead_id);
 
         if (!$lead) {
             return response()->json([
@@ -85,6 +85,8 @@ class QuotationController extends Controller
 
         $lead = Lead::with([
             'brand',
+            'model',
+            'variant',
             'source',
             'status',
             'assignedUser:id,name,email,phone,role',

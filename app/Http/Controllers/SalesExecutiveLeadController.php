@@ -17,6 +17,8 @@ class SalesExecutiveLeadController extends Controller
         // Scope leads strictly to authenticated Sales Executive
         $query = Lead::with([
             'brand',
+            'vehicleModel',
+            'variant',
             'source',
             'status',
             'assignedUser',
@@ -86,6 +88,8 @@ class SalesExecutiveLeadController extends Controller
 
         $lead = Lead::with([
             'brand',
+            'vehicleModel',
+            'variant',
             'source',
             'status',
             'assignedUser',

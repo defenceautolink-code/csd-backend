@@ -78,17 +78,32 @@ class DealController extends Controller
             $query->where('sales_executive_id', $request->sales_executive_id);
         }
 
-        // Date range filters
-        if ($request->filled('from_date')) {
-            $query->whereDate('booking_date', '>=', $request->from_date);
+        // Date range filters (Supports start_date, startDate, from_date, date_from, end_date, endDate, to_date, date_to, date)
+        $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('from_date') ?? $request->input('date_from');
+        $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('to_date') ?? $request->input('date_to');
+        $singleDate = $request->input('date');
+
+        $dateField = $request->input('date_field', 'booking_date');
+        if (!in_array($dateField, ['booking_date', 'created_at', 'expected_delivery_date', 'actual_delivery_date'])) {
+            $dateField = 'booking_date';
         }
-        if ($request->filled('to_date')) {
-            $query->whereDate('booking_date', '<=', $request->to_date);
+
+        if (!empty($singleDate)) {
+            $query->whereDate($dateField, $singleDate);
+        } else {
+            if (!empty($startDate)) {
+                $query->whereDate($dateField, '>=', $startDate);
+            }
+            if (!empty($endDate)) {
+                $query->whereDate($dateField, '<=', $endDate);
+            }
         }
 
         // Pagination or Full List
-        $perPage = (int) $request->get('per_page', 0);
-        if ($perPage > 0 || $request->filled('page')) {
+        $isAll = $request->boolean('all') || $request->get('per_page') === 'all' || (int) $request->get('per_page') === -1;
+
+        if (!$isAll) {
+            $perPage = (int) ($request->get('per_page') ?? $request->get('limit') ?? $request->get('pageSize') ?? 15);
             $perPage = $perPage > 0 ? $perPage : 15;
             $paginated = $query->latest('id')->paginate($perPage);
 
@@ -101,6 +116,8 @@ class DealController extends Controller
                     'last_page' => $paginated->lastPage(),
                     'per_page' => $paginated->perPage(),
                     'total' => $paginated->total(),
+                    'from' => $paginated->firstItem(),
+                    'to' => $paginated->lastItem(),
                 ],
             ]);
         }
@@ -111,6 +128,14 @@ class DealController extends Controller
             'status' => true,
             'message' => 'Deals retrieved successfully',
             'data' => $deals,
+            'pagination' => [
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => count($deals),
+                'total' => count($deals),
+                'from' => count($deals) > 0 ? 1 : null,
+                'to' => count($deals),
+            ],
             'total' => $deals->count(),
         ]);
     }
@@ -120,7 +145,7 @@ class DealController extends Controller
      */
     public function getLeadForDeal($lead_id)
     {
-        $lead = Lead::with(['brand', 'source', 'status', 'assignedUser', 'latestQuotation.items'])->find($lead_id);
+        $lead = Lead::with(['brand', 'model', 'variant', 'source', 'status', 'assignedUser', 'latestQuotation.items'])->find($lead_id);
 
         if (!$lead) {
             return response()->json([
@@ -507,6 +532,16 @@ class DealController extends Controller
                 $q->where('sales_executive_id', $user->id)
                   ->orWhere('sales_executive_name', 'like', '%' . $user->name . '%');
             });
+        }
+
+        // Optional date range filtering for stats
+        $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('from_date') ?? $request->input('date_from');
+        $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('to_date') ?? $request->input('date_to');
+        if (!empty($startDate)) {
+            $dealQuery->whereDate('booking_date', '>=', $startDate);
+        }
+        if (!empty($endDate)) {
+            $dealQuery->whereDate('booking_date', '<=', $endDate);
         }
 
         $totalDeals = (clone $dealQuery)->count();

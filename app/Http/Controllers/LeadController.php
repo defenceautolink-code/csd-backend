@@ -22,6 +22,8 @@ class LeadController extends Controller
 
         $query = Lead::with([
             'brand',
+            'model',
+            'variant',
             'source',
             'status',
             'assignedUser',
@@ -72,6 +74,16 @@ class LeadController extends Controller
         // Filter by Brand
         if ($request->filled('brand_id')) {
             $query->where('brand_id', $request->brand_id);
+        }
+
+        // Filter by Model
+        if ($request->filled('model_id')) {
+            $query->where('model_id', $request->model_id);
+        }
+
+        // Filter by Variant
+        if ($request->filled('variant_id')) {
+            $query->where('variant_id', $request->variant_id);
         }
 
         // Filter by Source
@@ -134,7 +146,9 @@ class LeadController extends Controller
             'vehicle_segment' => 'nullable|string',
             'brand_id' => 'nullable',
             'brand_name' => 'nullable|string|max:255',
-            'model_variant' => 'required|string|max:255',
+            'model_id' => 'nullable',
+            'variant_id' => 'nullable',
+            'model_variant' => 'nullable|string|max:255',
             'priority' => 'nullable|string',
             'purchase_timeline' => 'nullable|string|max:100',
             'source_id' => 'nullable',
@@ -154,6 +168,37 @@ class LeadController extends Controller
         } elseif (!$brandId && $brandName) {
             $brand = Brand::where('name', $brandName)->first();
             $brandId = $brand ? $brand->id : null;
+        }
+
+        // Auto-fill Model & Variant
+        $modelId = $request->filled('model_id') && is_numeric($request->model_id) ? (int) $request->model_id : null;
+        $variantId = $request->filled('variant_id') && is_numeric($request->variant_id) ? (int) $request->variant_id : null;
+
+        $modelObj = $modelId ? \App\Models\VehicleModel::find($modelId) : null;
+        $variantObj = $variantId ? \App\Models\VehicleVariant::find($variantId) : null;
+
+        if ($variantObj && !$modelId && $variantObj->model_id) {
+            $modelId = $variantObj->model_id;
+            $modelObj = $variantObj->model ?? \App\Models\VehicleModel::find($modelId);
+        }
+
+        if ($modelObj && !$brandId && $modelObj->brand_id) {
+            $brandId = $modelObj->brand_id;
+            $brandName = $brandName ?: ($modelObj->brand?->name ?? Brand::find($brandId)?->name);
+        }
+
+        // Auto-populate model_variant string if not explicitly passed
+        $modelVariant = $request->input('model_variant');
+        if (empty($modelVariant)) {
+            if ($modelObj && $variantObj) {
+                $modelVariant = trim($modelObj->name . ' ' . $variantObj->name);
+            } elseif ($variantObj) {
+                $modelVariant = $variantObj->name;
+            } elseif ($modelObj) {
+                $modelVariant = $modelObj->name;
+            } else {
+                $modelVariant = 'Vehicle Requirement';
+            }
         }
 
         // Auto-fill source
@@ -183,7 +228,7 @@ class LeadController extends Controller
         }
 
         // Vehicle segment normalization
-        $segment = $request->filled('vehicle_segment') ? $request->vehicle_segment : '4 Wheeler';
+        $segment = $request->filled('vehicle_segment') ? $request->vehicle_segment : ($modelObj->vehicle_segment ?? '4 Wheeler');
         if (stripos($segment, '2') !== false) {
             $segment = '2 Wheeler';
         } else {
@@ -207,7 +252,7 @@ class LeadController extends Controller
         $assignById = $this->resolveAssignByUserId($request->assign_by);
 
         $lead = \Illuminate\Support\Facades\DB::transaction(function () use (
-            $request, $brandId, $brandName, $sourceId, $sourceName, $statusId, $statusName,
+            $request, $brandId, $brandName, $modelId, $variantId, $modelVariant, $sourceId, $sourceName, $statusId, $statusName,
             $segment, $priority, $birthDate, $anniversaryDate, $assignedToId, $assignedUserName, $assignById
         ) {
             $lead = Lead::create([
@@ -221,7 +266,9 @@ class LeadController extends Controller
                 'vehicle_segment' => $segment,
                 'brand_id' => $brandId,
                 'brand_name' => $brandName,
-                'model_variant' => $request->model_variant,
+                'model_id' => $modelId,
+                'variant_id' => $variantId,
+                'model_variant' => $modelVariant,
                 'priority' => $priority,
                 'purchase_timeline' => $request->filled('purchase_timeline') ? $request->purchase_timeline : null,
                 'source_id' => $sourceId,
@@ -247,6 +294,8 @@ class LeadController extends Controller
 
         $lead->load([
             'brand',
+            'model',
+            'variant',
             'source',
             'status',
             'assignedUser',
@@ -270,6 +319,8 @@ class LeadController extends Controller
 
         $lead = Lead::with([
             'brand',
+            'model',
+            'variant',
             'source',
             'status',
             'assignedUser',
@@ -341,7 +392,9 @@ class LeadController extends Controller
             'vehicle_segment' => 'sometimes|required|string|in:2 Wheeler,4 Wheeler,2 wheeler,4 wheeler',
             'brand_id' => 'nullable|exists:brands,id',
             'brand_name' => 'nullable|string|max:255',
-            'model_variant' => 'sometimes|required|string|max:255',
+            'model_id' => 'nullable',
+            'variant_id' => 'nullable',
+            'model_variant' => 'sometimes|nullable|string|max:255',
             'priority' => 'sometimes|required|string|in:Hot,Warm,Cold,hot,warm,cold',
             'purchase_timeline' => 'nullable|string|max:100',
             'source_id' => 'nullable|exists:lead_sources,id',
@@ -399,6 +452,8 @@ class LeadController extends Controller
         if ($request->has('anniversary_date')) $updateData['anniversary_date'] = $request->anniversary_date;
         if ($request->has('vehicle_segment')) $updateData['vehicle_segment'] = $request->vehicle_segment;
         if ($request->has('brand_id')) $updateData['brand_id'] = $request->brand_id;
+        if ($request->has('model_id')) $updateData['model_id'] = $request->filled('model_id') ? $request->model_id : null;
+        if ($request->has('variant_id')) $updateData['variant_id'] = $request->filled('variant_id') ? $request->variant_id : null;
         if ($request->has('model_variant')) $updateData['model_variant'] = $request->model_variant;
         if ($request->has('priority')) $updateData['priority'] = ucfirst(strtolower($request->priority));
         if ($request->has('purchase_timeline')) $updateData['purchase_timeline'] = $request->purchase_timeline;
@@ -419,6 +474,8 @@ class LeadController extends Controller
 
         $lead->load([
             'brand',
+            'model',
+            'variant',
             'source',
             'status',
             'assignedUser',
@@ -661,6 +718,8 @@ class LeadController extends Controller
                     'mail' => 'email',
                     'segment' => 'vehicle_segment',
                     'type' => 'vehicle_segment',
+                    'model_id' => 'model_id',
+                    'variant_id' => 'variant_id',
                     'model' => 'model_variant',
                     'variant' => 'model_variant',
                     'vehicle' => 'model_variant',
@@ -836,6 +895,8 @@ class LeadController extends Controller
                     'vehicle_segment' => $segment,
                     'brand_id' => $brandId,
                     'brand_name' => $brandName,
+                    'model_id' => !empty($row['model_id']) && is_numeric($row['model_id']) ? (int) $row['model_id'] : null,
+                    'variant_id' => !empty($row['variant_id']) && is_numeric($row['variant_id']) ? (int) $row['variant_id'] : null,
                     'model_variant' => $modelVariant ?: 'Inquiry Model',
                     'priority' => $priority,
                     'purchase_timeline' => !empty($row['purchase_timeline']) ? $row['purchase_timeline'] : null,

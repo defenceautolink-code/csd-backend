@@ -70,12 +70,20 @@ class FollowUpController extends Controller
             }
         }
 
-        // Date Range on follow_up_date
-        if ($request->filled('date_from')) {
-            $query->whereDate('follow_up_date', '>=', $request->date_from);
-        }
-        if ($request->filled('date_to')) {
-            $query->whereDate('follow_up_date', '<=', $request->date_to);
+        // Date Range on follow_up_date (supports start_date, startDate, date_from, from_date, end_date, endDate, date_to, to_date, date)
+        $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('date_from') ?? $request->input('from_date');
+        $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('date_to') ?? $request->input('to_date');
+        $singleDate = $request->input('date');
+
+        if (!empty($singleDate)) {
+            $query->whereDate('follow_up_date', $singleDate);
+        } else {
+            if (!empty($startDate)) {
+                $query->whereDate('follow_up_date', '>=', $startDate);
+            }
+            if (!empty($endDate)) {
+                $query->whereDate('follow_up_date', '<=', $endDate);
+            }
         }
 
         // Search filter across customer name, phone, notes, executive name
@@ -107,8 +115,10 @@ class FollowUpController extends Controller
         $totalCount = (clone $kpiBaseQuery)->count();
 
         // Handle Pagination or Full List
-        $perPage = (int) $request->get('per_page', 0);
-        if ($perPage > 0 || $request->filled('page')) {
+        $isAll = $request->boolean('all') || $request->get('per_page') === 'all' || (int) $request->get('per_page') === -1;
+
+        if (!$isAll) {
+            $perPage = (int) ($request->get('per_page') ?? $request->get('limit') ?? $request->get('pageSize') ?? 15);
             $perPage = $perPage > 0 ? $perPage : 15;
             $paginated = $query->latest('id')->paginate($perPage);
 
@@ -127,6 +137,8 @@ class FollowUpController extends Controller
                     'last_page' => $paginated->lastPage(),
                     'per_page' => $paginated->perPage(),
                     'total' => $paginated->total(),
+                    'from' => $paginated->firstItem(),
+                    'to' => $paginated->lastItem(),
                 ],
             ]);
         }
@@ -148,6 +160,8 @@ class FollowUpController extends Controller
                 'last_page' => 1,
                 'per_page' => count($followUps),
                 'total' => count($followUps),
+                'from' => count($followUps) > 0 ? 1 : null,
+                'to' => count($followUps),
             ],
         ]);
     }
