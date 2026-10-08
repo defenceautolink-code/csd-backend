@@ -7,6 +7,8 @@ use App\Http\Controllers\LeadAssignmentHistoryController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\LeadSourceController;
 use App\Http\Controllers\LeadStatusController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\TokenBillingController;
 use App\Http\Controllers\DealController;
 use App\Http\Controllers\DealPaymentController;
 use App\Http\Controllers\ExpenseCategoryController;
@@ -15,6 +17,7 @@ use App\Http\Controllers\SalesExecutiveLeadController;
 use App\Http\Controllers\QuotationController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\VehicleModelController;
+use App\Http\Controllers\VehiclePriceMasterController;
 use App\Http\Controllers\VehicleVariantController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -106,5 +109,41 @@ Route::apiResource('expense-categories', ExpenseCategoryController::class);
 
 Route::get('expenses/stats', [ExpenseController::class, 'stats']);
 Route::apiResource('expenses', ExpenseController::class);
+
+
+// Reports & Dealership Analytics API Routes
+Route::prefix('reports')->group(function () {
+    Route::get('dealership-analytics', [ReportController::class, 'dealershipAnalytics']);
+    Route::get('kpi-summary', [ReportController::class, 'kpiSummary']);
+    Route::get('conversion-funnel', [ReportController::class, 'conversionFunnel']);
+    Route::get('lead-source-attribution', [ReportController::class, 'leadSourceAttribution']);
+    Route::get('executive-leaderboard', [ReportController::class, 'executiveLeaderboard']);
+    Route::get('export', [ReportController::class, 'exportReportData']);
+});
+
+// Vehicle Price Master & Calculator API Routes
+Route::prefix('price-master')->group(function () {
+    Route::get('/', [VehiclePriceMasterController::class, 'getPricingMaster']);
+    Route::get('variant/{id}', [VehiclePriceMasterController::class, 'getVariantPricing']);
+    Route::post('update-price', [VehiclePriceMasterController::class, 'updateAndPublishPrice']);
+    Route::post('calculate-on-road', [VehiclePriceMasterController::class, 'calculateOnRoad']);
+    Route::get('revisions', [VehiclePriceMasterController::class, 'getPriceRevisions']);
+    Route::post('send-quotation', [VehiclePriceMasterController::class, 'sendQuotation']);
+    Route::get('export', [VehiclePriceMasterController::class, 'exportPriceMaster']);
+});
+
+// Generate Invoice & Token Billing API Routes
+Route::prefix('token-billing')->group(function () {
+    Route::get('/', [TokenBillingController::class, 'getTokenBillingDashboard']);
+    Route::get('kpis', [TokenBillingController::class, 'getKpis']);
+    Route::get('tokens', [TokenBillingController::class, 'getCustomerTokens']);
+    Route::post('tokens', [TokenBillingController::class, 'storeToken']);
+    Route::get('tokens/{id}', [TokenBillingController::class, 'getSingleTokenLedger']);
+    Route::get('invoices', [TokenBillingController::class, 'getAllInvoices']);
+    Route::post('generate-invoice', [TokenBillingController::class, 'generateInvoice']);
+    Route::get('export-csv', [TokenBillingController::class, 'exportInvoicesCsv']);
+    Route::post('reset-demo', [TokenBillingController::class, 'resetDemo']);
+});
+
 
 
