@@ -96,6 +96,27 @@ class LeadController extends Controller
             $query->where('assigned_to', $request->assigned_to);
         }
 
+        // Date Range & Single Date Filters (start_date, end_date, startDate, endDate, from_date, to_date, date)
+        $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('from_date') ?? $request->input('date_from');
+        $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('to_date') ?? $request->input('date_to');
+        $singleDate = $request->input('date');
+
+        $dateField = $request->input('date_field', 'created_at');
+        if (!in_array($dateField, ['created_at', 'updated_at', 'birth_date', 'anniversary_date'])) {
+            $dateField = 'created_at';
+        }
+
+        if (!empty($singleDate)) {
+            $query->whereDate($dateField, $singleDate);
+        } else {
+            if (!empty($startDate)) {
+                $query->whereDate($dateField, '>=', $startDate);
+            }
+            if (!empty($endDate)) {
+                $query->whereDate($dateField, '<=', $endDate);
+            }
+        }
+
         // Handle Pagination or Full List
         $perPage = (int) $request->get('per_page', 0);
         if ($perPage > 0 || $request->filled('page')) {

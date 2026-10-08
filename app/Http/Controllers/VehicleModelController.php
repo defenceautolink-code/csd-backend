@@ -34,12 +34,44 @@ class VehicleModelController extends Controller
             $query->where('status', $request->status);
         }
 
+        // Handle Pagination or Full List
+        $isAll = $request->boolean('all') || $request->get('per_page') === 'all' || (int) $request->get('per_page') === -1 || $request->get('paginate') === 'false';
+
+        if (!$isAll) {
+            $perPage = (int) ($request->get('per_page') ?? $request->get('limit') ?? $request->get('pageSize') ?? 15);
+            $perPage = $perPage > 0 ? $perPage : 15;
+            $paginated = $query->latest()->paginate($perPage);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Vehicle models retrieved successfully',
+                'data' => $paginated->items(),
+                'pagination' => [
+                    'current_page' => $paginated->currentPage(),
+                    'last_page' => $paginated->lastPage(),
+                    'per_page' => $paginated->perPage(),
+                    'total' => $paginated->total(),
+                    'from' => $paginated->firstItem(),
+                    'to' => $paginated->lastItem(),
+                ],
+            ]);
+        }
+
         $models = $query->latest()->get();
 
         return response()->json([
             'status' => true,
             'message' => 'Vehicle models retrieved successfully',
             'data' => $models,
+            'pagination' => [
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => count($models),
+                'total' => count($models),
+                'from' => count($models) > 0 ? 1 : null,
+                'to' => count($models),
+            ],
+            'total' => $models->count(),
         ]);
     }
 

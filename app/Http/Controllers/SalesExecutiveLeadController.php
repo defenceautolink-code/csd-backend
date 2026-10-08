@@ -56,11 +56,19 @@ class SalesExecutiveLeadController extends Controller
         }
 
         // Filter by Date (created_at)
-        if ($request->filled('date')) {
-            $query->whereDate('created_at', $request->date);
-        }
-        if ($request->filled('from_date') && $request->filled('to_date')) {
-            $query->whereBetween('created_at', [$request->from_date, $request->to_date]);
+        $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('from_date') ?? $request->input('date_from');
+        $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('to_date') ?? $request->input('date_to');
+        $singleDate = $request->input('date');
+
+        if (!empty($singleDate)) {
+            $query->whereDate('created_at', $singleDate);
+        } else {
+            if (!empty($startDate)) {
+                $query->whereDate('created_at', '>=', $startDate);
+            }
+            if (!empty($endDate)) {
+                $query->whereDate('created_at', '<=', $endDate);
+            }
         }
 
         $perPage = (int) $request->get('per_page', 20);
