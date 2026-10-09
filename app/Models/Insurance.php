@@ -14,10 +14,6 @@ class Insurance extends Model
     protected $table = 'insurances';
 
     protected $fillable = [
-        'policy_number',
-        'insurance_company',
-        'insurance_type',
-        'policy_type',
         'deal_id',
         'lead_id',
         'customer_name',
@@ -55,6 +51,8 @@ class Insurance extends Model
     protected $appends = [
         'days_until_due',
         'computed_status',
+        'reminder_date',
+        'is_reminder_due',
     ];
 
     /**
@@ -62,19 +60,50 @@ class Insurance extends Model
      */
     public function getDaysUntilDueAttribute(): int
     {
-        if (!$this->next_insurance_date) {
+        $targetDate = $this->next_insurance_date ?? $this->expiry_date;
+        if (!$targetDate) {
             return 0;
         }
 
         $today = Carbon::today();
-        $nextDate = Carbon::parse($this->next_insurance_date)->startOfDay();
+        $nextDate = Carbon::parse($targetDate)->startOfDay();
 
         return (int) $today->diffInDays($nextDate, false);
     }
 
     /**
+     * Accessor: Dynamically calculate reminder date (15 days before actual insurance expire date)
+     */
+    public function getReminderDateAttribute(): ?string
+    {
+        $targetDate = $this->next_insurance_date ?? $this->expiry_date;
+        if (!$targetDate) {
+            return null;
+        }
+
+        return Carbon::parse($targetDate)->subDays(15)->format('Y-m-d');
+    }
+
+    /**
+     * Accessor: Check if reminder is due (15 days before expiry)
+     */
+    public function getIsReminderDueAttribute(): bool
+    {
+        if ($this->status === 'renewed') {
+            return false;
+        }
+
+        $reminderDate = $this->reminder_date;
+        if (!$reminderDate) {
+            return false;
+        }
+
+        return Carbon::today()->gte(Carbon::parse($reminderDate));
+    }
+
+    /**
      * Accessor: Dynamically determine status based on next_insurance_date
-     * Returns: active, expiring_soon (<= 30 days), expired (passed), or renewed
+     * Returns: active, expiring_soon (<= 15 days), expired (passed), or renewed
      */
     public function getComputedStatusAttribute(): string
     {
@@ -86,7 +115,7 @@ class Insurance extends Model
 
         if ($days < 0) {
             return 'expired';
-        } elseif ($days <= 30) {
+        } elseif ($days <= 15) {
             return 'expiring_soon';
         }
 

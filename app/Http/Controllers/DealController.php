@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Deal;
 use App\Models\DealPayment;
+use App\Models\Insurance;
 use App\Models\Lead;
 use App\Models\LeadFollowUp;
 use App\Models\LeadStatus;
@@ -299,6 +300,32 @@ class DealController extends Controller
                     'payment_terms' => $validated['payment_terms'] ?? null,
                     'delivery_terms' => $validated['delivery_terms'] ?? null,
                     'notes' => $validated['notes'] ?? null,
+                ]);
+
+                // Automatically create Insurance record for this Deal
+                $delivDate = $deal->actual_delivery_date ?? $deal->expected_delivery_date ?? $deal->booking_date ?? now()->format('Y-m-d');
+                $expireDate = \Illuminate\Support\Carbon::parse($delivDate)->addDays(365)->format('Y-m-d');
+
+                Insurance::create([
+                    'deal_id' => $deal->id,
+                    'lead_id' => $lead->id,
+                    'customer_name' => $deal->customer_name,
+                    'customer_phone' => $deal->customer_phone,
+                    'customer_email' => $deal->customer_email,
+                    'customer_address' => $deal->customer_city,
+                    'vehicle_name' => $deal->model_variant,
+                    'registration_number' => $deal->registration_number,
+                    'vin_chassis_number' => $deal->vin_chassis_number,
+                    'engine_number' => $deal->engine_number,
+                    'premium_amount' => 0.00,
+                    'delivery_date' => $delivDate,
+                    'start_date' => $delivDate,
+                    'expiry_date' => $expireDate,
+                    'next_insurance_date' => $expireDate,
+                    'status' => 'active',
+                    'created_by' => $user?->id,
+                    'sales_executive_id' => $deal->sales_executive_id,
+                    'sales_executive_name' => $deal->sales_executive_name,
                 ]);
 
                 // Update Lead status to "Deal Won" / Converted

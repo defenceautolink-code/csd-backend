@@ -111,12 +111,11 @@ Route::apiResource('expense-categories', ExpenseCategoryController::class);
 Route::get('expenses/stats', [ExpenseController::class, 'stats']);
 Route::apiResource('expenses', ExpenseController::class);
 
-// Vehicle Insurance & Renewal Reminders API Routes
-Route::get('insurances/stats', [InsuranceController::class, 'stats']);
-Route::get('insurances/reminders', [InsuranceController::class, 'dueReminders']);
-Route::get('insurances/deal-template/{dealId}', [InsuranceController::class, 'getDealTemplate']);
+// Vehicle Insurance & Renewal Reminders API Routes (Insert, Table Listing & Renewal)
+Route::get('insurances', [InsuranceController::class, 'index']);
+Route::post('insurances/store', [InsuranceController::class, 'store']);
 Route::post('insurances/{id}/renew', [InsuranceController::class, 'renew']);
-Route::apiResource('insurances', InsuranceController::class);
+Route::put('insurances/{id}', [InsuranceController::class, 'renew']);
 
 
 // Reports & Dealership Analytics API Routes

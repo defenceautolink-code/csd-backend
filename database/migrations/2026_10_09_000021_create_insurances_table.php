@@ -14,12 +14,6 @@ return new class extends Migration
         Schema::create('insurances', function (Blueprint $table) {
             $table->id();
 
-            // Policy Details
-            $table->string('policy_number')->nullable()->index();
-            $table->string('insurance_company'); // e.g. ICICI Lombard, HDFC ERGO, Bajaj Allianz, Tata AIG
-            $table->string('insurance_type')->default('Comprehensive'); // Comprehensive, Third Party, Zero Dep, Own Damage
-            $table->string('policy_type')->default('New Policy'); // New Policy, Renewal, Rollover
-
             // Related Deal & Lead
             $table->foreignId('deal_id')->nullable()->constrained('deals')->nullOnDelete();
             $table->foreignId('lead_id')->nullable()->constrained('leads')->nullOnDelete();
