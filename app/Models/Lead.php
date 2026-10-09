@@ -260,5 +260,13 @@ class Lead extends Model
     {
         return $this->hasMany(DealPayment::class, 'lead_id')->latest();
     }
+
+    /**
+     * Relationship: Insurance records for this Lead
+     */
+    public function insurances()
+    {
+        return $this->hasMany(Insurance::class, 'lead_id')->latest('id');
+    }
 }
 

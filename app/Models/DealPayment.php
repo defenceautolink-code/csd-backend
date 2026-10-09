@@ -23,6 +23,7 @@ class DealPayment extends Model
         'cheque_date',
         'cheque_status',
         'payment_proof_path',
+        'received_by',
         'status',
         'notes',
         'rejection_reason',
@@ -39,6 +40,27 @@ class DealPayment extends Model
         'verified_at' => 'datetime',
         'amount' => 'float',
     ];
+
+    protected $appends = [
+        'reference',
+        'utr',
+        'bank',
+    ];
+
+    public function getReferenceAttribute()
+    {
+        return $this->attributes['transaction_reference'] ?? null;
+    }
+
+    public function getUtrAttribute()
+    {
+        return $this->attributes['transaction_reference'] ?? null;
+    }
+
+    public function getBankAttribute()
+    {
+        return $this->attributes['bank_name'] ?? null;
+    }
 
     /**
      * Boot model events to automatically keep Deal financial totals in sync

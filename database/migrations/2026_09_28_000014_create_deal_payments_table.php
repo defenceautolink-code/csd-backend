@@ -40,6 +40,7 @@ return new class extends Migration
             
             // File attachment / Proof of receipt or deposit slip
             $table->string('payment_proof_path')->nullable();
+            $table->string('received_by')->nullable();
             
             // Verification & Clearance Status (pending, cleared, bounced, rejected, refunded)
             $table->string('status')->default('pending');

@@ -13,6 +13,7 @@ use App\Http\Controllers\DealController;
 use App\Http\Controllers\DealPaymentController;
 use App\Http\Controllers\ExpenseCategoryController;
 use App\Http\Controllers\ExpenseController;
+use App\Http\Controllers\InsuranceController;
 use App\Http\Controllers\SalesExecutiveLeadController;
 use App\Http\Controllers\QuotationController;
 use App\Http\Controllers\UserController;
@@ -109,6 +110,13 @@ Route::apiResource('expense-categories', ExpenseCategoryController::class);
 
 Route::get('expenses/stats', [ExpenseController::class, 'stats']);
 Route::apiResource('expenses', ExpenseController::class);
+
+// Vehicle Insurance & Renewal Reminders API Routes
+Route::get('insurances/stats', [InsuranceController::class, 'stats']);
+Route::get('insurances/reminders', [InsuranceController::class, 'dueReminders']);
+Route::get('insurances/deal-template/{dealId}', [InsuranceController::class, 'getDealTemplate']);
+Route::post('insurances/{id}/renew', [InsuranceController::class, 'renew']);
+Route::apiResource('insurances', InsuranceController::class);
 
 
 // Reports & Dealership Analytics API Routes

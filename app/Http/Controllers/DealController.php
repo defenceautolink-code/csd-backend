@@ -27,7 +27,7 @@ class DealController extends Controller
             'brand:id,name',
             'salesExecutive:id,name,email,role',
             'payments' => function ($q) {
-                $q->select('id', 'deal_id', 'receipt_number', 'payment_type', 'amount', 'payment_date', 'payment_mode', 'status')
+                $q->select('id', 'deal_id', 'receipt_number', 'payment_type', 'amount', 'payment_date', 'payment_mode', 'transaction_reference', 'bank_name', 'cheque_date', 'cheque_status', 'received_by', 'status', 'notes', 'recorded_by', 'recorded_by_name', 'verified_by', 'verified_by_name', 'verified_at')
                   ->orderBy('payment_date', 'asc');
             },
         ]);
@@ -213,6 +213,14 @@ class DealController extends Controller
             'notes' => 'nullable|string',
             'sales_executive_id' => 'nullable|exists:users,id',
             'sales_executive_name' => 'nullable|string|max:150',
+            'received_by' => 'nullable|string|max:255',
+            'transaction_reference' => 'nullable|string|max:150',
+            'reference' => 'nullable|string|max:150',
+            'utr' => 'nullable|string|max:150',
+            'transaction_no' => 'nullable|string|max:150',
+            'reference_no' => 'nullable|string|max:150',
+            'bank_name' => 'nullable|string|max:100',
+            'bank' => 'nullable|string|max:100',
 
             // Optional Initial Payment details
             'initial_payment' => 'nullable|array',
@@ -221,12 +229,19 @@ class DealController extends Controller
             'initial_payment.payment_mode' => 'nullable|string',
             'initial_payment.payment_date' => 'nullable|date',
             'initial_payment.transaction_reference' => 'nullable|string|max:150',
+            'initial_payment.reference' => 'nullable|string|max:150',
+            'initial_payment.utr' => 'nullable|string|max:150',
+            'initial_payment.transaction_no' => 'nullable|string|max:150',
+            'initial_payment.reference_no' => 'nullable|string|max:150',
+            'initial_payment.reference_number' => 'nullable|string|max:150',
             'initial_payment.bank_name' => 'nullable|string|max:100',
+            'initial_payment.bank' => 'nullable|string|max:100',
+            'initial_payment.received_by' => 'nullable|string|max:255',
             'initial_payment.notes' => 'nullable|string',
             'initial_payment.auto_clear' => 'nullable|boolean',
         ]);
 
-        return DB::transaction(function () use ($validated, $user) {
+        return DB::transaction(function () use ($validated, $user, $request) {
             $lead = Lead::findOrFail($validated['lead_id']);
 
             $totalAmount = (float) $validated['total_amount'];
@@ -286,7 +301,7 @@ class DealController extends Controller
             // Log Follow-up history entry
             LeadFollowUp::create([
                 'lead_id' => $lead->id,
-                'user_id' => $user?->id,
+                'user_id' => $user?->id ?? $lead->assigned_to ?? \App\Models\User::first()?->id ?? 1,
                 'user_name' => $user?->name ?? 'System',
                 'follow_up_date' => now()->format('Y-m-d'),
                 'follow_up_time' => now()->format('H:i:s'),
@@ -305,22 +320,67 @@ class DealController extends Controller
             }
 
             // Create initial payment receipt if provided
-            if (!empty($validated['initial_payment']['amount']) && (float) $validated['initial_payment']['amount'] > 0) {
-                $initPay = $validated['initial_payment'];
-                $autoClear = !empty($initPay['auto_clear']) || ($user && in_array(strtolower($user->role), ['admin', 'super_admin', 'accountant']));
+            $initPay = $validated['initial_payment'] ?? $request->input('initial_payment') ?? [];
+            $initAmount = (float) ($initPay['amount'] ?? $request->input('initial_payment.amount') ?? $request->input('amount') ?? 0);
+
+            if ($initAmount > 0) {
+                $autoClear = !empty($initPay['auto_clear']) 
+                    || !empty($request->input('initial_payment.auto_clear')) 
+                    || ($user && in_array(strtolower(str_replace(' ', '_', $user->role ?? '')), ['admin', 'super_admin', 'accountant', 'accounts_manager', 'cashier']));
+
+                $transactionRef = $initPay['transaction_reference'] 
+                    ?? $initPay['reference'] 
+                    ?? $initPay['utr'] 
+                    ?? $initPay['transaction_no'] 
+                    ?? $initPay['reference_no'] 
+                    ?? $initPay['reference_number'] 
+                    ?? $request->input('initial_payment.transaction_reference') 
+                    ?? $request->input('initial_payment.reference') 
+                    ?? $request->input('initial_payment.utr') 
+                    ?? $request->input('initial_payment.transaction_no') 
+                    ?? $request->input('initial_payment.reference_no') 
+                    ?? $request->input('initial_payment.reference_number') 
+                    ?? $validated['transaction_reference'] 
+                    ?? $validated['reference'] 
+                    ?? $validated['utr'] 
+                    ?? $validated['transaction_no'] 
+                    ?? $validated['reference_no'] 
+                    ?? $request->input('transaction_reference') 
+                    ?? $request->input('reference') 
+                    ?? $request->input('utr') 
+                    ?? $request->input('transaction_no') 
+                    ?? $request->input('reference_no') 
+                    ?? null;
+
+                $bankName = $initPay['bank_name'] 
+                    ?? $initPay['bank'] 
+                    ?? $request->input('initial_payment.bank_name') 
+                    ?? $request->input('initial_payment.bank') 
+                    ?? $validated['bank_name'] 
+                    ?? $validated['bank'] 
+                    ?? $request->input('bank_name') 
+                    ?? $request->input('bank') 
+                    ?? null;
+
+                $receivedBy = $initPay['received_by'] 
+                    ?? $request->input('initial_payment.received_by') 
+                    ?? $validated['received_by'] 
+                    ?? $request->input('received_by') 
+                    ?? null;
 
                 $payment = DealPayment::create([
                     'receipt_number' => DealPayment::generateReceiptNumber(),
                     'deal_id' => $deal->id,
                     'lead_id' => $lead->id,
-                    'payment_type' => $initPay['payment_type'] ?? 'token_advance',
-                    'amount' => (float) $initPay['amount'],
-                    'payment_date' => $initPay['payment_date'] ?? now()->format('Y-m-d'),
-                    'payment_mode' => $initPay['payment_mode'] ?? 'upi',
-                    'transaction_reference' => $initPay['transaction_reference'] ?? null,
-                    'bank_name' => $initPay['bank_name'] ?? null,
+                    'payment_type' => $initPay['payment_type'] ?? $request->input('initial_payment.payment_type') ?? 'token_advance',
+                    'amount' => $initAmount,
+                    'payment_date' => $initPay['payment_date'] ?? $request->input('initial_payment.payment_date') ?? now()->format('Y-m-d'),
+                    'payment_mode' => $initPay['payment_mode'] ?? $request->input('initial_payment.payment_mode') ?? 'upi',
+                    'transaction_reference' => $transactionRef,
+                    'bank_name' => $bankName,
+                    'received_by' => $receivedBy,
                     'status' => $autoClear ? 'cleared' : 'pending',
-                    'notes' => $initPay['notes'] ?? 'Initial booking token advance payment',
+                    'notes' => $initPay['notes'] ?? $request->input('initial_payment.notes') ?? 'Initial booking token advance payment',
                     'recorded_by' => $user?->id,
                     'recorded_by_name' => $user?->name,
                     'verified_by' => $autoClear ? $user?->id : null,

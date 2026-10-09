@@ -133,6 +133,14 @@ class Deal extends Model
     }
 
     /**
+     * Relationship: Insurance records for this Deal
+     */
+    public function insurances()
+    {
+        return $this->hasMany(Insurance::class, 'deal_id')->latest('id');
+    }
+
+    /**
      * Recalculate financial totals and payment status based on cleared payments
      */
     public function recalculateFinancials(): void

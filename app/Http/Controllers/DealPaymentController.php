@@ -73,8 +73,10 @@ class DealPaymentController extends Controller
         }
 
         // Pagination or Full List
-        $perPage = (int) $request->get('per_page', 0);
-        if ($perPage > 0 || $request->filled('page')) {
+        $isAll = $request->boolean('all') || $request->get('per_page') === 'all' || (int) $request->get('per_page') === -1;
+
+        if (!$isAll) {
+            $perPage = (int) ($request->get('per_page') ?? $request->get('limit') ?? $request->get('pageSize') ?? 15);
             $perPage = $perPage > 0 ? $perPage : 15;
             $paginated = $query->latest('id')->paginate($perPage);
 
@@ -87,6 +89,8 @@ class DealPaymentController extends Controller
                     'last_page' => $paginated->lastPage(),
                     'per_page' => $paginated->perPage(),
                     'total' => $paginated->total(),
+                    'from' => $paginated->firstItem(),
+                    'to' => $paginated->lastItem(),
                 ],
             ]);
         }
@@ -97,6 +101,14 @@ class DealPaymentController extends Controller
             'status' => true,
             'message' => 'Payments retrieved successfully',
             'data' => $payments,
+            'pagination' => [
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => $payments->count(),
+                'total' => $payments->count(),
+                'from' => $payments->count() > 0 ? 1 : null,
+                'to' => $payments->count(),
+            ],
             'total' => $payments->count(),
         ]);
     }
@@ -178,6 +190,20 @@ class DealPaymentController extends Controller
     {
         $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
 
+        // Merge common alias field names if primary field names are missing
+        if (!$request->has('transaction_reference')) {
+            $ref = $request->input('reference') ?? $request->input('utr') ?? $request->input('transaction_no') ?? $request->input('reference_no') ?? $request->input('reference_number');
+            if ($ref !== null) {
+                $request->merge(['transaction_reference' => $ref]);
+            }
+        }
+        if (!$request->has('bank_name')) {
+            $bank = $request->input('bank');
+            if ($bank !== null) {
+                $request->merge(['bank_name' => $bank]);
+            }
+        }
+
         $validated = $request->validate([
             'deal_id' => 'required|exists:deals,id',
             'amount' => 'required|numeric|min:1',
@@ -185,9 +211,14 @@ class DealPaymentController extends Controller
             'payment_mode' => 'required|string|in:upi,neft_rtgs,cheque,cash,card_pos,bank_disbursal',
             'payment_date' => 'required|date',
             'transaction_reference' => 'nullable|string|max:150',
+            'reference' => 'nullable|string|max:150',
+            'utr' => 'nullable|string|max:150',
+            'transaction_no' => 'nullable|string|max:150',
             'bank_name' => 'nullable|string|max:100',
+            'bank' => 'nullable|string|max:100',
             'cheque_date' => 'nullable|date',
             'payment_proof' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120', // 5MB max
+            'received_by' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
             'auto_clear' => 'nullable|boolean', // If accountant or cashier directly creates cleared payment
         ]);
@@ -219,6 +250,7 @@ class DealPaymentController extends Controller
             'cheque_date' => $validated['cheque_date'] ?? null,
             'cheque_status' => $validated['payment_mode'] === 'cheque' ? 'pending_clearance' : null,
             'payment_proof_path' => $proofPath,
+            'received_by' => $validated['received_by'] ?? null,
             'status' => $shouldClear ? 'cleared' : 'pending',
             'notes' => $validated['notes'] ?? null,
             'recorded_by' => $user?->id,
@@ -290,14 +322,33 @@ class DealPaymentController extends Controller
             ], 404);
         }
 
+        // Merge common alias field names if primary field names are missing
+        if (!$request->has('transaction_reference')) {
+            $ref = $request->input('reference') ?? $request->input('utr') ?? $request->input('transaction_no') ?? $request->input('reference_no') ?? $request->input('reference_number');
+            if ($ref !== null) {
+                $request->merge(['transaction_reference' => $ref]);
+            }
+        }
+        if (!$request->has('bank_name')) {
+            $bank = $request->input('bank');
+            if ($bank !== null) {
+                $request->merge(['bank_name' => $bank]);
+            }
+        }
+
         $validated = $request->validate([
             'amount' => 'sometimes|numeric|min:1',
             'payment_type' => 'sometimes|string|in:token_advance,down_payment,bank_finance,exchange_bonus,part_payment,balance_payment,accessory_payment,refund',
             'payment_mode' => 'sometimes|string|in:upi,neft_rtgs,cheque,cash,card_pos,bank_disbursal',
             'payment_date' => 'sometimes|date',
             'transaction_reference' => 'nullable|string|max:150',
+            'reference' => 'nullable|string|max:150',
+            'utr' => 'nullable|string|max:150',
+            'transaction_no' => 'nullable|string|max:150',
             'bank_name' => 'nullable|string|max:100',
+            'bank' => 'nullable|string|max:100',
             'cheque_date' => 'nullable|date',
+            'received_by' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
         ]);
 
