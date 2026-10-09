@@ -18,50 +18,58 @@ class VehiclePriceMasterController extends Controller
      */
     public function getPricingMaster(Request $request)
     {
-        // Selected or Default Variant (e.g. Maruti Suzuki Grand Vitara Alpha+ Strong Hybrid)
-        $variantId = $request->input('variant_id');
-        $variant = null;
+        try {
+            // Selected or Default Variant (e.g. Maruti Suzuki Grand Vitara Alpha+ Strong Hybrid)
+            $variantId = $request->input('variant_id');
+            $variant = null;
 
-        if ($variantId) {
-            $variant = VehicleVariant::with(['brand', 'model'])->find($variantId);
+            if ($variantId) {
+                $variant = VehicleVariant::with(['brand', 'model'])->find($variantId);
+            }
+
+            if (!$variant) {
+                $variant = VehicleVariant::with(['brand', 'model'])
+                    ->where('name', 'like', '%Alpha+%')
+                    ->first() 
+                    ?? VehicleVariant::with(['brand', 'model'])->first();
+            }
+
+            // Section 1: Update Charges Form Data
+            $formData = $this->buildUpdateFormData($variant);
+
+            // Section 2: Live On-Road Calculation Breakdown
+            $onRoadBreakdown = $this->calculateOnRoadBreakdown(
+                $formData['ex_showroom_price'],
+                $formData['rto_road_tax'],
+                $formData['insurance'],
+                $formData['fastag_logistics'],
+                $variant
+            );
+
+            // Section 3: Recent Price Revisions & Audit Log
+            $revisionsRes = $this->fetchRecentRevisions($request);
+
+            // Brands / Models / Variants dropdown master tree
+            $brandTree = Brand::with(['models.variants'])->where('status', 'Active')->get();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Vehicle price master & calculator retrieved successfully',
+                'data' => [
+                    'selected_variant' => $formData,
+                    'estimated_on_road_breakdown' => $onRoadBreakdown,
+                    'recent_price_revisions' => $revisionsRes['items'],
+                    'pagination' => $revisionsRes['pagination'],
+                    'brands_master' => $brandTree,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('VehiclePriceMasterController@getPricingMaster error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching price master details.',
+            ], 500);
         }
-
-        if (!$variant) {
-            $variant = VehicleVariant::with(['brand', 'model'])
-                ->where('name', 'like', '%Alpha+%')
-                ->first() 
-                ?? VehicleVariant::with(['brand', 'model'])->first();
-        }
-
-        // Section 1: Update Charges Form Data
-        $formData = $this->buildUpdateFormData($variant);
-
-        // Section 2: Live On-Road Calculation Breakdown
-        $onRoadBreakdown = $this->calculateOnRoadBreakdown(
-            $formData['ex_showroom_price'],
-            $formData['rto_road_tax'],
-            $formData['insurance'],
-            $formData['fastag_logistics'],
-            $variant
-        );
-
-        // Section 3: Recent Price Revisions & Audit Log
-        $revisionsRes = $this->fetchRecentRevisions($request);
-
-        // Brands / Models / Variants dropdown master tree
-        $brandTree = Brand::with(['models.variants'])->where('status', 'Active')->get();
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Vehicle price master & calculator retrieved successfully',
-            'data' => [
-                'selected_variant' => $formData,
-                'estimated_on_road_breakdown' => $onRoadBreakdown,
-                'recent_price_revisions' => $revisionsRes['items'],
-                'pagination' => $revisionsRes['pagination'],
-                'brands_master' => $brandTree,
-            ],
-        ]);
     }
 
     /**
@@ -69,32 +77,40 @@ class VehiclePriceMasterController extends Controller
      */
     public function getVariantPricing(Request $request, $variantId)
     {
-        $variant = VehicleVariant::with(['brand', 'model'])->find($variantId);
+        try {
+            $variant = VehicleVariant::with(['brand', 'model'])->find($variantId);
 
-        if (!$variant) {
+            if (!$variant) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Vehicle variant not found',
+                ], 404);
+            }
+
+            $formData = $this->buildUpdateFormData($variant);
+            $onRoadBreakdown = $this->calculateOnRoadBreakdown(
+                $formData['ex_showroom_price'],
+                $formData['rto_road_tax'],
+                $formData['insurance'],
+                $formData['fastag_logistics'],
+                $variant
+            );
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Variant pricing retrieved successfully',
+                'data' => [
+                    'variant_pricing' => $formData,
+                    'estimated_on_road_breakdown' => $onRoadBreakdown,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('VehiclePriceMasterController@getVariantPricing error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json([
                 'status' => false,
-                'message' => 'Vehicle variant not found',
-            ], 404);
+                'message' => $e->getMessage() ?: 'An error occurred while fetching variant pricing.',
+            ], 500);
         }
-
-        $formData = $this->buildUpdateFormData($variant);
-        $onRoadBreakdown = $this->calculateOnRoadBreakdown(
-            $formData['ex_showroom_price'],
-            $formData['rto_road_tax'],
-            $formData['insurance'],
-            $formData['fastag_logistics'],
-            $variant
-        );
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Variant pricing retrieved successfully',
-            'data' => [
-                'variant_pricing' => $formData,
-                'estimated_on_road_breakdown' => $onRoadBreakdown,
-            ],
-        ]);
     }
 
     /**
@@ -102,89 +118,103 @@ class VehiclePriceMasterController extends Controller
      */
     public function updateAndPublishPrice(Request $request)
     {
-        $request->validate([
-            'variant_id' => 'required|exists:vehicle_variants,id',
-            'ex_showroom_price' => 'required|numeric|min:0',
-            'rto_road_tax' => 'nullable|numeric|min:0',
-            'insurance' => 'nullable|numeric|min:0',
-            'fastag_logistics' => 'nullable|numeric|min:0',
-        ]);
+        try {
+            $request->validate([
+                'variant_id' => 'required|exists:vehicle_variants,id',
+                'ex_showroom_price' => 'required|numeric|min:0',
+                'rto_road_tax' => 'nullable|numeric|min:0',
+                'insurance' => 'nullable|numeric|min:0',
+                'fastag_logistics' => 'nullable|numeric|min:0',
+            ]);
 
-        $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
-        $updatedByName = $user ? $user->name : 'Alexander Vance';
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            $updatedByName = $user ? $user->name : 'Alexander Vance';
 
-        $variant = VehicleVariant::with(['brand', 'model'])->findOrFail($request->variant_id);
+            $variant = VehicleVariant::with(['brand', 'model'])->findOrFail($request->variant_id);
 
-        $previousExShowroom = (float) ($variant->ex_showroom_price > 0 ? $variant->ex_showroom_price : $variant->price);
-        $previousOnRoad = (float) $variant->calculated_on_road_price;
+            $previousExShowroom = (float) ($variant->ex_showroom_price > 0 ? $variant->ex_showroom_price : $variant->price);
+            $previousOnRoad = (float) $variant->calculated_on_road_price;
 
-        $revisedExShowroom = (float) $request->ex_showroom_price;
-        $rtoTax = $request->has('rto_road_tax') ? (float) $request->rto_road_tax : round($revisedExShowroom * 0.10, 2);
-        $insurance = $request->has('insurance') ? (float) $request->insurance : 68000.00;
-        $fastagLogistics = $request->has('fastag_logistics') ? (float) $request->fastag_logistics : 2500.00;
+            $revisedExShowroom = (float) $request->ex_showroom_price;
+            $rtoTax = $request->has('rto_road_tax') ? (float) $request->rto_road_tax : round($revisedExShowroom * 0.10, 2);
+            $insurance = $request->has('insurance') ? (float) $request->insurance : 68000.00;
+            $fastagLogistics = $request->has('fastag_logistics') ? (float) $request->fastag_logistics : 2500.00;
 
-        $revisedOnRoad = round($revisedExShowroom + $rtoTax + $insurance + $fastagLogistics, 2);
-        $netDifference = round($revisedExShowroom - $previousExShowroom, 2);
+            $revisedOnRoad = round($revisedExShowroom + $rtoTax + $insurance + $fastagLogistics, 2);
+            $netDifference = round($revisedExShowroom - $previousExShowroom, 2);
 
-        // Update Variant Record
-        $variant->update([
-            'price' => $revisedExShowroom,
-            'ex_showroom_price' => $revisedExShowroom,
-            'rto_road_tax' => $rtoTax,
-            'insurance' => $insurance,
-            'fastag_logistics' => $fastagLogistics,
-            'on_road_price' => $revisedOnRoad,
-        ]);
+            // Update Variant Record
+            $variant->update([
+                'price' => $revisedExShowroom,
+                'ex_showroom_price' => $revisedExShowroom,
+                'rto_road_tax' => $rtoTax,
+                'insurance' => $insurance,
+                'fastag_logistics' => $fastagLogistics,
+                'on_road_price' => $revisedOnRoad,
+            ]);
 
-        // Record Audit Log Entry in vehicle_price_logs
-        $modelVariantName = $variant->model ? "{$variant->name} ({$variant->model->name})" : $variant->name;
-        $brandName = $variant->brand ? $variant->brand->name : ($variant->model?->brand_name ?? 'Maruti Suzuki');
+            // Record Audit Log Entry in vehicle_price_logs
+            $modelVariantName = $variant->model ? "{$variant->name} ({$variant->model->name})" : $variant->name;
+            $brandName = $variant->brand ? $variant->brand->name : ($variant->model?->brand_name ?? 'Maruti Suzuki');
 
-        $priceLog = VehiclePriceLog::create([
-            'variant_id' => $variant->id,
-            'model_id' => $variant->model_id,
-            'brand_id' => $variant->brand_id,
-            'model_variant_name' => $modelVariantName,
-            'brand_name' => $brandName,
-            'previous_ex_showroom' => $previousExShowroom,
-            'revised_ex_showroom' => $revisedExShowroom,
-            'net_difference' => $netDifference,
-            'rto_road_tax' => $rtoTax,
-            'insurance' => $insurance,
-            'fastag_logistics' => $fastagLogistics,
-            'previous_on_road' => $previousOnRoad,
-            'revised_on_road' => $revisedOnRoad,
-            'updated_by_id' => $user?->id,
-            'updated_by_name' => $updatedByName,
-            'revision_date' => Carbon::now()->format('Y-m-d'),
-            'status' => 'Active',
-        ]);
+            $priceLog = VehiclePriceLog::create([
+                'variant_id' => $variant->id,
+                'model_id' => $variant->model_id,
+                'brand_id' => $variant->brand_id,
+                'model_variant_name' => $modelVariantName,
+                'brand_name' => $brandName,
+                'previous_ex_showroom' => $previousExShowroom,
+                'revised_ex_showroom' => $revisedExShowroom,
+                'net_difference' => $netDifference,
+                'rto_road_tax' => $rtoTax,
+                'insurance' => $insurance,
+                'fastag_logistics' => $fastagLogistics,
+                'previous_on_road' => $previousOnRoad,
+                'revised_on_road' => $revisedOnRoad,
+                'updated_by_id' => $user?->id,
+                'updated_by_name' => $updatedByName,
+                'revision_date' => Carbon::now()->format('Y-m-d'),
+                'status' => 'Active',
+            ]);
 
-        $formData = $this->buildUpdateFormData($variant->fresh(['brand', 'model']));
-        $onRoadBreakdown = $this->calculateOnRoadBreakdown($revisedExShowroom, $rtoTax, $insurance, $fastagLogistics, $variant);
+            $formData = $this->buildUpdateFormData($variant->fresh(['brand', 'model']));
+            $onRoadBreakdown = $this->calculateOnRoadBreakdown($revisedExShowroom, $rtoTax, $insurance, $fastagLogistics, $variant);
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Vehicle price updated and published successfully',
-            'data' => [
-                'variant_pricing' => $formData,
-                'estimated_on_road_breakdown' => $onRoadBreakdown,
-                'price_revision_log' => [
-                    'id' => $priceLog->id,
-                    'revision_date' => Carbon::parse($priceLog->revision_date)->format('M d, Y'),
-                    'vehicle_model_variant' => $priceLog->model_variant_name,
-                    'brand' => $priceLog->brand_name,
-                    'previous_price' => $priceLog->previous_ex_showroom,
-                    'formatted_previous_price' => "₹" . number_format($priceLog->previous_ex_showroom, 0),
-                    'revised_ex_showroom' => $priceLog->revised_ex_showroom,
-                    'formatted_revised_ex_showroom' => "₹" . number_format($priceLog->revised_ex_showroom, 0),
-                    'net_difference' => $priceLog->net_difference,
-                    'formatted_net_difference' => ($priceLog->net_difference >= 0 ? "+₹" : "-₹") . number_format(abs($priceLog->net_difference), 0),
-                    'updated_by' => $priceLog->updated_by_name,
-                    'status' => $priceLog->status,
+            return response()->json([
+                'status' => true,
+                'message' => 'Vehicle price updated and published successfully',
+                'data' => [
+                    'variant_pricing' => $formData,
+                    'estimated_on_road_breakdown' => $onRoadBreakdown,
+                    'price_revision_log' => [
+                        'id' => $priceLog->id,
+                        'revision_date' => Carbon::parse($priceLog->revision_date)->format('M d, Y'),
+                        'vehicle_model_variant' => $priceLog->model_variant_name,
+                        'brand' => $priceLog->brand_name,
+                        'previous_price' => $priceLog->previous_ex_showroom,
+                        'formatted_previous_price' => "₹" . number_format($priceLog->previous_ex_showroom, 0),
+                        'revised_ex_showroom' => $priceLog->revised_ex_showroom,
+                        'formatted_revised_ex_showroom' => "₹" . number_format($priceLog->revised_ex_showroom, 0),
+                        'net_difference' => $priceLog->net_difference,
+                        'formatted_net_difference' => ($priceLog->net_difference >= 0 ? "+₹" : "-₹") . number_format(abs($priceLog->net_difference), 0),
+                        'updated_by' => $priceLog->updated_by_name,
+                        'status' => $priceLog->status,
+                    ],
                 ],
-            ],
-        ]);
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('VehiclePriceMasterController@updateAndPublishPrice error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while updating price.',
+            ], 500);
+        }
     }
 
     /**
@@ -192,23 +222,31 @@ class VehiclePriceMasterController extends Controller
      */
     public function calculateOnRoad(Request $request)
     {
-        $exShowroom = (float) ($request->input('ex_showroom_price') ?? $request->input('ex_showroom_base_price') ?? 1999000.00);
-        $rtoTax = (float) ($request->input('rto_road_tax') ?? $request->input('rto_tax') ?? round($exShowroom * 0.10, 2));
-        $insurance = (float) ($request->input('insurance') ?? 68000.00);
-        $fastagLogistics = (float) ($request->input('fastag_logistics') ?? $request->input('fastag_hypothecation') ?? 2500.00);
+        try {
+            $exShowroom = (float) ($request->input('ex_showroom_price') ?? $request->input('ex_showroom_base_price') ?? 1999000.00);
+            $rtoTax = (float) ($request->input('rto_road_tax') ?? $request->input('rto_tax') ?? round($exShowroom * 0.10, 2));
+            $insurance = (float) ($request->input('insurance') ?? 68000.00);
+            $fastagLogistics = (float) ($request->input('fastag_logistics') ?? $request->input('fastag_hypothecation') ?? 2500.00);
 
-        $variant = null;
-        if ($request->filled('variant_id')) {
-            $variant = VehicleVariant::with(['brand', 'model'])->find($request->variant_id);
+            $variant = null;
+            if ($request->filled('variant_id')) {
+                $variant = VehicleVariant::with(['brand', 'model'])->find($request->variant_id);
+            }
+
+            $onRoadBreakdown = $this->calculateOnRoadBreakdown($exShowroom, $rtoTax, $insurance, $fastagLogistics, $variant);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'On-road price calculated successfully',
+                'data' => $onRoadBreakdown,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('VehiclePriceMasterController@calculateOnRoad error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while calculating on-road price.',
+            ], 500);
         }
-
-        $onRoadBreakdown = $this->calculateOnRoadBreakdown($exShowroom, $rtoTax, $insurance, $fastagLogistics, $variant);
-
-        return response()->json([
-            'status' => true,
-            'message' => 'On-road price calculated successfully',
-            'data' => $onRoadBreakdown,
-        ]);
     }
 
     /**
@@ -216,15 +254,23 @@ class VehiclePriceMasterController extends Controller
      */
     public function getPriceRevisions(Request $request)
     {
-        $res = $this->fetchRecentRevisions($request);
+        try {
+            $res = $this->fetchRecentRevisions($request);
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Recent price revisions and audit logs retrieved successfully',
-            'data' => $res['items'],
-            'pagination' => $res['pagination'],
-            'total' => $res['pagination']['total'],
-        ]);
+            return response()->json([
+                'status' => true,
+                'message' => 'Recent price revisions and audit logs retrieved successfully',
+                'data' => $res['items'],
+                'pagination' => $res['pagination'],
+                'total' => $res['pagination']['total'],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('VehiclePriceMasterController@getPriceRevisions error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching price revisions.',
+            ], 500);
+        }
     }
 
     /**
@@ -232,42 +278,56 @@ class VehiclePriceMasterController extends Controller
      */
     public function sendQuotation(Request $request)
     {
-        $request->validate([
-            'variant_id' => 'required|exists:vehicle_variants,id',
-            'customer_name' => 'nullable|string|max:255',
-            'customer_email' => 'nullable|email|max:255',
-            'customer_phone' => 'nullable|string|max:20',
-        ]);
+        try {
+            $request->validate([
+                'variant_id' => 'required|exists:vehicle_variants,id',
+                'customer_name' => 'nullable|string|max:255',
+                'customer_email' => 'nullable|email|max:255',
+                'customer_phone' => 'nullable|string|max:20',
+            ]);
 
-        $variant = VehicleVariant::with(['brand', 'model'])->findOrFail($request->variant_id);
-        $exShowroom = (float) ($variant->ex_showroom_price > 0 ? $variant->ex_showroom_price : $variant->price);
-        $rtoTax = (float) ($variant->rto_road_tax > 0 ? $variant->rto_road_tax : round($exShowroom * 0.10, 2));
-        $insurance = (float) ($variant->insurance > 0 ? $variant->insurance : 68000.00);
-        $fastag = (float) ($variant->fastag_logistics > 0 ? $variant->fastag_logistics : 2500.00);
-        $onRoad = round($exShowroom + $rtoTax + $insurance + $fastag, 2);
+            $variant = VehicleVariant::with(['brand', 'model'])->findOrFail($request->variant_id);
+            $exShowroom = (float) ($variant->ex_showroom_price > 0 ? $variant->ex_showroom_price : $variant->price);
+            $rtoTax = (float) ($variant->rto_road_tax > 0 ? $variant->rto_road_tax : round($exShowroom * 0.10, 2));
+            $insurance = (float) ($variant->insurance > 0 ? $variant->insurance : 68000.00);
+            $fastag = (float) ($variant->fastag_logistics > 0 ? $variant->fastag_logistics : 2500.00);
+            $onRoad = round($exShowroom + $rtoTax + $insurance + $fastag, 2);
 
-        $quotationNumber = 'QUO-' . date('Y') . '-' . str_pad((string) (Quotation::count() + 1), 4, '0', STR_PAD_LEFT);
+            $quotationNumber = 'QUO-' . date('Y') . '-' . str_pad((string) (Quotation::count() + 1), 4, '0', STR_PAD_LEFT);
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Quotation payload initialized successfully for ' . $variant->name,
-            'data' => [
-                'quotation_number' => $quotationNumber,
-                'vehicle_summary' => [
-                    'brand_name' => $variant->brand?->name ?? 'Maruti Suzuki',
-                    'model_name' => $variant->model?->name ?? 'Grand Vitara',
-                    'variant_name' => $variant->name,
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotation payload initialized successfully for ' . $variant->name,
+                'data' => [
+                    'quotation_number' => $quotationNumber,
+                    'vehicle_summary' => [
+                        'brand_name' => $variant->brand?->name ?? 'Maruti Suzuki',
+                        'model_name' => $variant->model?->name ?? 'Grand Vitara',
+                        'variant_name' => $variant->name,
+                    ],
+                    'pricing_breakdown' => [
+                        'ex_showroom_price' => $exShowroom,
+                        'rto_road_tax' => $rtoTax,
+                        'insurance' => $insurance,
+                        'fastag_logistics' => $fastag,
+                        'total_estimated_on_road_price' => $onRoad,
+                        'formatted_on_road_price' => "₹" . number_format($onRoad, 0),
+                    ],
                 ],
-                'pricing_breakdown' => [
-                    'ex_showroom_price' => $exShowroom,
-                    'rto_road_tax' => $rtoTax,
-                    'insurance' => $insurance,
-                    'fastag_logistics' => $fastag,
-                    'total_estimated_on_road_price' => $onRoad,
-                    'formatted_on_road_price' => "₹" . number_format($onRoad, 0),
-                ],
-            ],
-        ]);
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('VehiclePriceMasterController@sendQuotation error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while initializing quotation payload.',
+            ], 500);
+        }
     }
 
     /**
@@ -275,35 +335,43 @@ class VehiclePriceMasterController extends Controller
      */
     public function exportPriceMaster(Request $request)
     {
-        $variants = VehicleVariant::with(['brand', 'model'])->get();
+        try {
+            $variants = VehicleVariant::with(['brand', 'model'])->get();
 
-        $exportData = $variants->map(function ($v) {
-            $exShowroom = (float) ($v->ex_showroom_price > 0 ? $v->ex_showroom_price : $v->price);
-            $rto = (float) ($v->rto_road_tax > 0 ? $v->rto_road_tax : round($exShowroom * 0.10, 2));
-            $insurance = (float) ($v->insurance > 0 ? $v->insurance : 68000.00);
-            $fastag = (float) ($v->fastag_logistics > 0 ? $v->fastag_logistics : 2500.00);
-            $onRoad = round($exShowroom + $rto + $insurance + $fastag, 2);
+            $exportData = $variants->map(function ($v) {
+                $exShowroom = (float) ($v->ex_showroom_price > 0 ? $v->ex_showroom_price : $v->price);
+                $rto = (float) ($v->rto_road_tax > 0 ? $v->rto_road_tax : round($exShowroom * 0.10, 2));
+                $insurance = (float) ($v->insurance > 0 ? $v->insurance : 68000.00);
+                $fastag = (float) ($v->fastag_logistics > 0 ? $v->fastag_logistics : 2500.00);
+                $onRoad = round($exShowroom + $rto + $insurance + $fastag, 2);
 
-            return [
-                'brand' => $v->brand?->name ?? 'N/A',
-                'model' => $v->model?->name ?? 'N/A',
-                'variant' => $v->name,
-                'ex_showroom_price' => $exShowroom,
-                'rto_road_tax' => $rto,
-                'insurance' => $insurance,
-                'fastag_logistics' => $fastag,
-                'on_road_price' => $onRoad,
-                'status' => $v->status,
-            ];
-        });
+                return [
+                    'brand' => $v->brand?->name ?? 'N/A',
+                    'model' => $v->model?->name ?? 'N/A',
+                    'variant' => $v->name,
+                    'ex_showroom_price' => $exShowroom,
+                    'rto_road_tax' => $rto,
+                    'insurance' => $insurance,
+                    'fastag_logistics' => $fastag,
+                    'on_road_price' => $onRoad,
+                    'status' => $v->status,
+                ];
+            });
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Vehicle Price Master export ready',
-            'export_filename' => 'vehicle_price_master_' . date('Y_m_d') . '.csv',
-            'total_items' => count($exportData),
-            'data' => $exportData,
-        ]);
+            return response()->json([
+                'status' => true,
+                'message' => 'Vehicle Price Master export ready',
+                'export_filename' => 'vehicle_price_master_' . date('Y_m_d') . '.csv',
+                'total_items' => count($exportData),
+                'data' => $exportData,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('VehiclePriceMasterController@exportPriceMaster error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while exporting price master.',
+            ], 500);
+        }
     }
 
     // =========================================================================

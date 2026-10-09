@@ -25,107 +25,107 @@ class ReportController extends Controller
      */
     public function dealershipAnalytics(Request $request)
     {
-        $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
 
-        // 1. Resolve Time Filtering & Date Boundaries
-        $dateParams = $this->resolveDateBoundaries($request);
-        $startDate = $dateParams['start_date'];
-        $endDate = $dateParams['end_date'];
-        $periodLabel = $dateParams['period_label'];
+            // 1. Resolve Time Filtering & Date Boundaries
+            $dateParams = $this->resolveDateBoundaries($request);
+            $startDate = $dateParams['start_date'];
+            $endDate = $dateParams['end_date'];
+            $periodLabel = $dateParams['period_label'];
 
-        // Resolve Previous Period Date Boundaries for Comparison (e.g. vs last quarter)
-        $prevDateParams = $this->resolvePreviousPeriodBoundaries($startDate, $endDate);
-        $prevStartDate = $prevDateParams['start_date'];
-        $prevEndDate = $prevDateParams['end_date'];
+            // Resolve Previous Period Date Boundaries for Comparison (e.g. vs last quarter)
+            $prevDateParams = $this->resolvePreviousPeriodBoundaries($startDate, $endDate);
+            $prevStartDate = $prevDateParams['start_date'];
+            $prevEndDate = $prevDateParams['end_date'];
 
-        // 2. Base Scoped Queries
-        $leadQuery = Lead::query();
-        $dealQuery = Deal::query();
-        $followUpQuery = LeadFollowUp::query();
+            // 2. Base Scoped Queries
+            $leadQuery = Lead::query();
+            $dealQuery = Deal::query();
+            $followUpQuery = LeadFollowUp::query();
 
-        // Role Scoping for Sales Executive
-        if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
-            $leadQuery->where(function ($q) use ($user) {
-                $q->where('assigned_to', $user->id)
-                  ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
-            });
-            $dealQuery->where(function ($q) use ($user) {
-                $q->where('sales_executive_id', $user->id)
-                  ->orWhere('sales_executive_name', 'like', '%' . $user->name . '%');
-            });
-            $followUpQuery->where('user_id', $user->id);
-        }
+            // Role Scoping for Sales Executive
+            if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
+                $leadQuery->where(function ($q) use ($user) {
+                    $q->where('assigned_to', $user->id)
+                      ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                });
+                $dealQuery->where(function ($q) use ($user) {
+                    $q->where('sales_executive_id', $user->id)
+                      ->orWhere('sales_executive_name', 'like', '%' . $user->name . '%');
+                });
+                $followUpQuery->where('user_id', $user->id);
+            }
 
-        // Additional Optional Filters
-        if ($request->filled('brand_id')) {
-            $leadQuery->where('brand_id', $request->brand_id);
-            $dealQuery->where('brand_id', $request->brand_id);
-        }
-        if ($request->filled('sales_executive_id')) {
-            $leadQuery->where('assigned_to', $request->sales_executive_id);
-            $dealQuery->where('sales_executive_id', $request->sales_executive_id);
-        }
-        if ($request->filled('vehicle_segment')) {
-            $leadQuery->where('vehicle_segment', $request->vehicle_segment);
-            $dealQuery->where('vehicle_segment', $request->vehicle_segment);
-        }
+            // Additional Optional Filters
+            if ($request->filled('brand_id')) {
+                $leadQuery->where('brand_id', $request->brand_id);
+                $dealQuery->where('brand_id', $request->brand_id);
+            }
+            if ($request->filled('sales_executive_id')) {
+                $leadQuery->where('assigned_to', $request->sales_executive_id);
+                $dealQuery->where('sales_executive_id', $request->sales_executive_id);
+            }
+            if ($request->filled('vehicle_segment')) {
+                $leadQuery->where('vehicle_segment', $request->vehicle_segment);
+                $dealQuery->where('vehicle_segment', $request->vehicle_segment);
+            }
 
-        // Apply Date Range Filters
-        if ($startDate) {
-            $leadQuery->whereDate('created_at', '>=', $startDate);
-            $dealQuery->whereDate('booking_date', '>=', $startDate);
-            $followUpQuery->whereDate('follow_up_date', '>=', $startDate);
-        }
-        if ($endDate) {
-            $leadQuery->whereDate('created_at', '<=', $endDate);
-            $dealQuery->whereDate('booking_date', '<=', $endDate);
-            $followUpQuery->whereDate('follow_up_date', '<=', $endDate);
-        }
+            // Apply Date Range Filters
+            if ($startDate) {
+                $leadQuery->whereDate('created_at', '>=', $startDate);
+                $dealQuery->whereDate('booking_date', '>=', $startDate);
+                $followUpQuery->whereDate('follow_up_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $leadQuery->whereDate('created_at', '<=', $endDate);
+                $dealQuery->whereDate('booking_date', '<=', $endDate);
+                $followUpQuery->whereDate('follow_up_date', '<=', $endDate);
+            }
 
-        // -------------------------------------------------------------
-        // SECTION 1: KPI SUMMARY CARDS
-        // -------------------------------------------------------------
-        $kpiSummary = $this->calculateKpiSummary(
-            $dealQuery,
-            $leadQuery,
-            $prevStartDate,
-            $prevEndDate,
-            $startDate,
-            $endDate,
-            $user
-        );
+            // SECTION 1: KPI SUMMARY CARDS
+            $kpiSummary = $this->calculateKpiSummary(
+                $dealQuery,
+                $leadQuery,
+                $prevStartDate,
+                $prevEndDate,
+                $startDate,
+                $endDate,
+                $user
+            );
 
-        // -------------------------------------------------------------
-        // SECTION 2: SALES CONVERSION FUNNEL
-        // -------------------------------------------------------------
-        $salesFunnel = $this->calculateConversionFunnel($leadQuery, $followUpQuery);
+            // SECTION 2: SALES CONVERSION FUNNEL
+            $salesFunnel = $this->calculateConversionFunnel($leadQuery, $followUpQuery);
 
-        // -------------------------------------------------------------
-        // SECTION 3: LEAD SOURCE ATTRIBUTION
-        // -------------------------------------------------------------
-        $sourceAttribution = $this->calculateSourceAttribution($leadQuery, $startDate, $endDate);
+            // SECTION 3: LEAD SOURCE ATTRIBUTION
+            $sourceAttribution = $this->calculateSourceAttribution($leadQuery, $startDate, $endDate);
 
-        // -------------------------------------------------------------
-        // SECTION 4: SALES EXECUTIVE PERFORMANCE LEADERBOARD
-        // -------------------------------------------------------------
-        $executiveLeaderboard = $this->calculateExecutiveLeaderboard($startDate, $endDate);
+            // SECTION 4: SALES EXECUTIVE PERFORMANCE LEADERBOARD
+            $executiveLeaderboard = $this->calculateExecutiveLeaderboard($startDate, $endDate);
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Dealership Analytics & Performance Reports retrieved successfully',
-            'data' => [
-                'time_filter' => [
-                    'selected_period' => $request->input('period') ?? $request->input('time_range') ?? 'current_quarter',
-                    'period_label' => $periodLabel,
-                    'start_date' => $startDate ? $startDate->format('Y-m-d') : null,
-                    'end_date' => $endDate ? $endDate->format('Y-m-d') : null,
+            return response()->json([
+                'status' => true,
+                'message' => 'Dealership Analytics & Performance Reports retrieved successfully',
+                'data' => [
+                    'time_filter' => [
+                        'selected_period' => $request->input('period') ?? $request->input('time_range') ?? 'current_quarter',
+                        'period_label' => $periodLabel,
+                        'start_date' => $startDate ? $startDate->format('Y-m-d') : null,
+                        'end_date' => $endDate ? $endDate->format('Y-m-d') : null,
+                    ],
+                    'kpi_summary' => $kpiSummary,
+                    'sales_conversion_funnel' => $salesFunnel,
+                    'lead_source_attribution' => $sourceAttribution,
+                    'sales_executive_leaderboard' => $executiveLeaderboard,
                 ],
-                'kpi_summary' => $kpiSummary,
-                'sales_conversion_funnel' => $salesFunnel,
-                'lead_source_attribution' => $sourceAttribution,
-                'sales_executive_leaderboard' => $executiveLeaderboard,
-            ],
-        ]);
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('ReportController@dealershipAnalytics error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching analytics.',
+            ], 500);
+        }
     }
 
     /**
@@ -133,35 +133,43 @@ class ReportController extends Controller
      */
     public function kpiSummary(Request $request)
     {
-        $dateParams = $this->resolveDateBoundaries($request);
-        $startDate = $dateParams['start_date'];
-        $endDate = $dateParams['end_date'];
+        try {
+            $dateParams = $this->resolveDateBoundaries($request);
+            $startDate = $dateParams['start_date'];
+            $endDate = $dateParams['end_date'];
 
-        $prevDateParams = $this->resolvePreviousPeriodBoundaries($startDate, $endDate);
-        $prevStartDate = $prevDateParams['start_date'];
-        $prevEndDate = $prevDateParams['end_date'];
+            $prevDateParams = $this->resolvePreviousPeriodBoundaries($startDate, $endDate);
+            $prevStartDate = $prevDateParams['start_date'];
+            $prevEndDate = $prevDateParams['end_date'];
 
-        $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
 
-        $leadQuery = Lead::query();
-        $dealQuery = Deal::query();
+            $leadQuery = Lead::query();
+            $dealQuery = Deal::query();
 
-        if ($startDate) {
-            $leadQuery->whereDate('created_at', '>=', $startDate);
-            $dealQuery->whereDate('booking_date', '>=', $startDate);
+            if ($startDate) {
+                $leadQuery->whereDate('created_at', '>=', $startDate);
+                $dealQuery->whereDate('booking_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $leadQuery->whereDate('created_at', '<=', $endDate);
+                $dealQuery->whereDate('booking_date', '<=', $endDate);
+            }
+
+            $kpis = $this->calculateKpiSummary($dealQuery, $leadQuery, $prevStartDate, $prevEndDate, $startDate, $endDate, $user);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'KPI summary retrieved successfully',
+                'data' => $kpis,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('ReportController@kpiSummary error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching KPI summary.',
+            ], 500);
         }
-        if ($endDate) {
-            $leadQuery->whereDate('created_at', '<=', $endDate);
-            $dealQuery->whereDate('booking_date', '<=', $endDate);
-        }
-
-        $kpis = $this->calculateKpiSummary($dealQuery, $leadQuery, $prevStartDate, $prevEndDate, $startDate, $endDate, $user);
-
-        return response()->json([
-            'status' => true,
-            'message' => 'KPI summary retrieved successfully',
-            'data' => $kpis,
-        ]);
     }
 
     /**
@@ -169,29 +177,37 @@ class ReportController extends Controller
      */
     public function conversionFunnel(Request $request)
     {
-        $dateParams = $this->resolveDateBoundaries($request);
-        $startDate = $dateParams['start_date'];
-        $endDate = $dateParams['end_date'];
+        try {
+            $dateParams = $this->resolveDateBoundaries($request);
+            $startDate = $dateParams['start_date'];
+            $endDate = $dateParams['end_date'];
 
-        $leadQuery = Lead::query();
-        $followUpQuery = LeadFollowUp::query();
+            $leadQuery = Lead::query();
+            $followUpQuery = LeadFollowUp::query();
 
-        if ($startDate) {
-            $leadQuery->whereDate('created_at', '>=', $startDate);
-            $followUpQuery->whereDate('follow_up_date', '>=', $startDate);
+            if ($startDate) {
+                $leadQuery->whereDate('created_at', '>=', $startDate);
+                $followUpQuery->whereDate('follow_up_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $leadQuery->whereDate('created_at', '<=', $endDate);
+                $followUpQuery->whereDate('follow_up_date', '<=', $endDate);
+            }
+
+            $funnel = $this->calculateConversionFunnel($leadQuery, $followUpQuery);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Sales conversion funnel retrieved successfully',
+                'data' => $funnel,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('ReportController@conversionFunnel error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching conversion funnel.',
+            ], 500);
         }
-        if ($endDate) {
-            $leadQuery->whereDate('created_at', '<=', $endDate);
-            $followUpQuery->whereDate('follow_up_date', '<=', $endDate);
-        }
-
-        $funnel = $this->calculateConversionFunnel($leadQuery, $followUpQuery);
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Sales conversion funnel retrieved successfully',
-            'data' => $funnel,
-        ]);
     }
 
     /**
@@ -199,25 +215,33 @@ class ReportController extends Controller
      */
     public function leadSourceAttribution(Request $request)
     {
-        $dateParams = $this->resolveDateBoundaries($request);
-        $startDate = $dateParams['start_date'];
-        $endDate = $dateParams['end_date'];
+        try {
+            $dateParams = $this->resolveDateBoundaries($request);
+            $startDate = $dateParams['start_date'];
+            $endDate = $dateParams['end_date'];
 
-        $leadQuery = Lead::query();
-        if ($startDate) {
-            $leadQuery->whereDate('created_at', '>=', $startDate);
+            $leadQuery = Lead::query();
+            if ($startDate) {
+                $leadQuery->whereDate('created_at', '>=', $startDate);
+            }
+            if ($endDate) {
+                $leadQuery->whereDate('created_at', '<=', $endDate);
+            }
+
+            $sources = $this->calculateSourceAttribution($leadQuery, $startDate, $endDate);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Lead source attribution retrieved successfully',
+                'data' => $sources,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('ReportController@leadSourceAttribution error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching lead source attribution.',
+            ], 500);
         }
-        if ($endDate) {
-            $leadQuery->whereDate('created_at', '<=', $endDate);
-        }
-
-        $sources = $this->calculateSourceAttribution($leadQuery, $startDate, $endDate);
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Lead source attribution retrieved successfully',
-            'data' => $sources,
-        ]);
     }
 
     /**
@@ -225,33 +249,49 @@ class ReportController extends Controller
      */
     public function executiveLeaderboard(Request $request)
     {
-        $dateParams = $this->resolveDateBoundaries($request);
-        $startDate = $dateParams['start_date'];
-        $endDate = $dateParams['end_date'];
+        try {
+            $dateParams = $this->resolveDateBoundaries($request);
+            $startDate = $dateParams['start_date'];
+            $endDate = $dateParams['end_date'];
 
-        $leaderboard = $this->calculateExecutiveLeaderboard($startDate, $endDate);
+            $leaderboard = $this->calculateExecutiveLeaderboard($startDate, $endDate);
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Sales executive leaderboard retrieved successfully',
-            'data' => $leaderboard,
-        ]);
+            return response()->json([
+                'status' => true,
+                'message' => 'Sales executive leaderboard retrieved successfully',
+                'data' => $leaderboard,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('ReportController@executiveLeaderboard error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching leaderboard.',
+            ], 500);
+        }
     }
 
     /**
-     * Export Report Data Endpoint (Generates export-ready structured metadata)
+     * Export Report Data Endpoint
      */
     public function exportReportData(Request $request)
     {
-        $response = $this->dealershipAnalytics($request)->getData(true);
+        try {
+            $response = $this->dealershipAnalytics($request)->getData(true);
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Export data payload prepared successfully',
-            'export_filename' => 'dealership_analytics_report_' . date('Y_m_d') . '.json',
-            'generated_at' => now()->toIso8601String(),
-            'report' => $response['data'] ?? [],
-        ]);
+            return response()->json([
+                'status' => true,
+                'message' => 'Export data payload prepared successfully',
+                'export_filename' => 'dealership_analytics_report_' . date('Y_m_d') . '.json',
+                'generated_at' => now()->toIso8601String(),
+                'report' => $response['data'] ?? [],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('ReportController@exportReportData error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while preparing export data.',
+            ], 500);
+        }
     }
 
     // =========================================================================

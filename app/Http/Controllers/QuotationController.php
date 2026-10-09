@@ -21,147 +21,49 @@ class QuotationController extends Controller
      */
     public function getLeadForQuotation($lead_id)
     {
-        $user = auth()->user();
+        try {
+            $user = auth()->user();
 
-        $lead = Lead::with(['brand', 'model', 'variant', 'source', 'status', 'assignedUser'])->find($lead_id);
+            $lead = Lead::with(['brand', 'model', 'variant', 'source', 'status', 'assignedUser'])->find($lead_id);
 
-        if (!$lead) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Lead not found.',
-            ], 404);
-        }
-
-        // Permission check for Sales Executive
-        if ($user && $user->role === 'Sales Executive') {
-            $isAssigned = ($lead->assigned_to == $user->id) ||
-                (stripos($lead->assigned_user_name ?? '', $user->name) !== false);
-            if (!$isAssigned) {
+            if (!$lead) {
                 return response()->json([
                     'status' => false,
-                    'message' => 'You do not have permission to access quotations for this lead.',
-                ], 403);
+                    'message' => 'Lead not found.',
+                ], 404);
             }
-        }
 
-        $address = trim(implode(', ', array_filter([$lead->city, $lead->state])));
-        $subject = 'Price Quotation – ' . ($lead->model_variant ?: ($lead->brand_name ? $lead->brand_name . ' Vehicle' : 'Vehicle Requirement'));
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Lead quotation data retrieved successfully',
-            'data' => [
-                'lead_id' => $lead->id,
-                'customer_name' => $lead->name,
-                'company_name' => '',
-                'email' => $lead->email,
-                'phone' => $lead->phone,
-                'address' => $address,
-                'city' => $lead->city,
-                'state' => $lead->state,
-                'vehicle_segment' => $lead->vehicle_segment,
-                'brand_id' => $lead->brand_id,
-                'brand_name' => $lead->brand_name,
-                'model_variant' => $lead->model_variant,
-                'suggested_subject' => $subject,
-                'suggested_item' => [
-                    'name' => $lead->model_variant ?: ($lead->brand_name ?: 'Vehicle Purchase'),
-                    'description' => trim(implode(' • ', array_filter([$lead->vehicle_segment, $lead->brand_name]))),
-                    'quantity' => 1,
-                    'unit_price' => 0,
-                    'discount' => 0,
-                    'tax' => 18, // standard GST percentage default
-                ],
-            ],
-        ]);
-    }
-
-    /**
-     * Get complete lead details along with all quotations for the lead
-     */
-    public function getByLead(Request $request, $lead_id)
-    {
-        $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
-
-        $lead = Lead::with([
-            'brand',
-            'model',
-            'variant',
-            'source',
-            'status',
-            'assignedUser:id,name,email,phone,role',
-            'latestAssignment',
-            'quotations' => function ($q) {
-                $q->with(['items', 'creator:id,name,email,phone,role'])->latest('id');
+            // Permission check for Sales Executive
+            if ($user && $user->role === 'Sales Executive') {
+                $isAssigned = ($lead->assigned_to == $user->id) ||
+                    (stripos($lead->assigned_user_name ?? '', $user->name) !== false);
+                if (!$isAssigned) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'You do not have permission to access quotations for this lead.',
+                    ], 403);
+                }
             }
-        ])->find($lead_id);
 
-        if (!$lead) {
+            $address = trim(implode(', ', array_filter([$lead->city, $lead->state])));
+            $subject = 'Price Quotation – ' . ($lead->model_variant ?: ($lead->brand_name ? $lead->brand_name . ' Vehicle' : 'Vehicle Requirement'));
+
             return response()->json([
-                'status' => false,
-                'message' => 'Lead not found.',
-            ], 404);
-        }
-
-        // Permission check for Sales Executive
-        if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
-            $isAssigned = ($lead->assigned_to == $user->id) ||
-                (stripos($lead->assigned_user_name ?? '', $user->name) !== false);
-            if (!$isAssigned) {
-                return response()->json([
-                    'status' => false,
-                    'message' => 'You do not have permission to access quotations for this lead.',
-                ], 403);
-            }
-        }
-
-        $address = trim(implode(', ', array_filter([$lead->city, $lead->state])));
-        $subject = 'Price Quotation – ' . ($lead->model_variant ?: ($lead->brand_name ? $lead->brand_name . ' Vehicle' : 'Vehicle Requirement'));
-
-        $quotations = $lead->quotations ?? collect();
-
-        $summary = [
-            'total_quotations' => $quotations->count(),
-            'latest_quotation_id' => $quotations->first()?->id,
-            'latest_quotation_number' => $quotations->first()?->quotation_number,
-            'latest_quotation_amount' => $quotations->first()?->grand_total,
-            'latest_quotation_status' => $quotations->first()?->status,
-            'has_accepted_quotation' => $quotations->contains('status', 'accepted'),
-        ];
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Lead and quotations data retrieved successfully',
-            'data' => [
-                'lead' => [
-                    'id' => $lead->id,
-                    'name' => $lead->name,
+                'status' => true,
+                'message' => 'Lead quotation data retrieved successfully',
+                'data' => [
+                    'lead_id' => $lead->id,
+                    'customer_name' => $lead->name,
+                    'company_name' => '',
                     'email' => $lead->email,
                     'phone' => $lead->phone,
+                    'address' => $address,
                     'city' => $lead->city,
                     'state' => $lead->state,
-                    'address' => $address,
-                    'birth_date' => $lead->birth_date ? ($lead->birth_date instanceof \DateTimeInterface ? $lead->birth_date->format('Y-m-d') : $lead->birth_date) : null,
-                    'anniversary_date' => $lead->anniversary_date ? ($lead->anniversary_date instanceof \DateTimeInterface ? $lead->anniversary_date->format('Y-m-d') : $lead->anniversary_date) : null,
-                    'is_birthday_today' => $lead->is_birthday_today,
-                    'is_anniversary_today' => $lead->is_anniversary_today,
                     'vehicle_segment' => $lead->vehicle_segment,
                     'brand_id' => $lead->brand_id,
                     'brand_name' => $lead->brand_name,
-                    'brand' => $lead->brand,
                     'model_variant' => $lead->model_variant,
-                    'priority' => $lead->priority,
-                    'purchase_timeline' => $lead->purchase_timeline,
-                    'source_id' => $lead->source_id,
-                    'source_name' => $lead->source_name,
-                    'source' => $lead->source,
-                    'status_id' => $lead->status_id,
-                    'status_name' => $lead->status_name,
-                    'status' => $lead->status,
-                    'assigned_to' => $lead->assigned_to,
-                    'assigned_user_name' => $lead->assigned_user_name,
-                    'assigned_to_display' => $lead->assigned_to_display,
-                    'assigned_user' => $lead->assignedUser,
                     'suggested_subject' => $subject,
                     'suggested_item' => [
                         'name' => $lead->model_variant ?: ($lead->brand_name ?: 'Vehicle Purchase'),
@@ -171,84 +73,206 @@ class QuotationController extends Controller
                         'discount' => 0,
                         'tax' => 18,
                     ],
-                    'created_at' => $lead->created_at,
-                    'updated_at' => $lead->updated_at,
                 ],
-                'summary' => $summary,
-                'quotations' => $quotations,
-            ],
-        ]);
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@getLeadForQuotation error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching lead details for quotation.',
+            ], 500);
+        }
     }
 
     /**
-     * Display a listing of quotations (with search, status filter, date filter, pagination)
+     * Get complete lead details along with all quotations for the lead
+     */
+    public function getByLead(Request $request, $lead_id)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+
+            $lead = Lead::with([
+                'brand',
+                'model',
+                'variant',
+                'source',
+                'status',
+                'assignedUser:id,name,email,phone,role',
+                'latestAssignment',
+                'quotations' => function ($q) {
+                    $q->with(['items', 'creator:id,name,email,phone,role'])->latest('id');
+                }
+            ])->find($lead_id);
+
+            if (!$lead) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Lead not found.',
+                ], 404);
+            }
+
+            // Permission check for Sales Executive
+            if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
+                $isAssigned = ($lead->assigned_to == $user->id) ||
+                    (stripos($lead->assigned_user_name ?? '', $user->name) !== false);
+                if (!$isAssigned) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'You do not have permission to access quotations for this lead.',
+                    ], 403);
+                }
+            }
+
+            $address = trim(implode(', ', array_filter([$lead->city, $lead->state])));
+            $subject = 'Price Quotation – ' . ($lead->model_variant ?: ($lead->brand_name ? $lead->brand_name . ' Vehicle' : 'Vehicle Requirement'));
+
+            $quotations = $lead->quotations ?? collect();
+
+            $summary = [
+                'total_quotations' => $quotations->count(),
+                'latest_quotation_id' => $quotations->first()?->id,
+                'latest_quotation_number' => $quotations->first()?->quotation_number,
+                'latest_quotation_amount' => $quotations->first()?->grand_total,
+                'latest_quotation_status' => $quotations->first()?->status,
+                'has_accepted_quotation' => $quotations->contains('status', 'accepted'),
+            ];
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Lead and quotations data retrieved successfully',
+                'data' => [
+                    'lead' => [
+                        'id' => $lead->id,
+                        'name' => $lead->name,
+                        'email' => $lead->email,
+                        'phone' => $lead->phone,
+                        'city' => $lead->city,
+                        'state' => $lead->state,
+                        'address' => $address,
+                        'birth_date' => $lead->birth_date ? ($lead->birth_date instanceof \DateTimeInterface ? $lead->birth_date->format('Y-m-d') : $lead->birth_date) : null,
+                        'anniversary_date' => $lead->anniversary_date ? ($lead->anniversary_date instanceof \DateTimeInterface ? $lead->anniversary_date->format('Y-m-d') : $lead->anniversary_date) : null,
+                        'is_birthday_today' => $lead->is_birthday_today,
+                        'is_anniversary_today' => $lead->is_anniversary_today,
+                        'vehicle_segment' => $lead->vehicle_segment,
+                        'brand_id' => $lead->brand_id,
+                        'brand_name' => $lead->brand_name,
+                        'brand' => $lead->brand,
+                        'model_variant' => $lead->model_variant,
+                        'priority' => $lead->priority,
+                        'purchase_timeline' => $lead->purchase_timeline,
+                        'source_id' => $lead->source_id,
+                        'source_name' => $lead->source_name,
+                        'source' => $lead->source,
+                        'status_id' => $lead->status_id,
+                        'status_name' => $lead->status_name,
+                        'status' => $lead->status,
+                        'assigned_to' => $lead->assigned_to,
+                        'assigned_user_name' => $lead->assigned_user_name,
+                        'assigned_to_display' => $lead->assigned_to_display,
+                        'assigned_user' => $lead->assignedUser,
+                        'suggested_subject' => $subject,
+                        'suggested_item' => [
+                            'name' => $lead->model_variant ?: ($lead->brand_name ?: 'Vehicle Purchase'),
+                            'description' => trim(implode(' • ', array_filter([$lead->vehicle_segment, $lead->brand_name]))),
+                            'quantity' => 1,
+                            'unit_price' => 0,
+                            'discount' => 0,
+                            'tax' => 18,
+                        ],
+                        'created_at' => $lead->created_at,
+                        'updated_at' => $lead->updated_at,
+                    ],
+                    'summary' => $summary,
+                    'quotations' => $quotations,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@getByLead error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching quotations for lead.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Display a listing of quotations
      */
     public function index(Request $request)
     {
-        $user = auth()->user();
+        try {
+            $user = auth()->user();
 
-        $query = Quotation::with([
-            'lead:id,name,phone,email,model_variant,brand_name,vehicle_segment,assigned_to,assigned_user_name',
-            'creator:id,name,role',
-            'items',
-        ]);
+            $query = Quotation::with([
+                'lead:id,name,phone,email,model_variant,brand_name,vehicle_segment,assigned_to,assigned_user_name',
+                'creator:id,name,role',
+                'items',
+            ]);
 
-        // Scoping for Sales Executive
-        if ($user && $user->role === 'Sales Executive') {
-            $query->where(function ($q) use ($user) {
-                $q->where('created_by', $user->id)
-                  ->orWhereHas('lead', function ($leadQuery) use ($user) {
-                      $leadQuery->where('assigned_to', $user->id)
-                                ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
-                  });
-            });
+            // Scoping for Sales Executive
+            if ($user && $user->role === 'Sales Executive') {
+                $query->where(function ($q) use ($user) {
+                    $q->where('created_by', $user->id)
+                      ->orWhereHas('lead', function ($leadQuery) use ($user) {
+                          $leadQuery->where('assigned_to', $user->id)
+                                    ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                      });
+                });
+            }
+
+            // Search Filter
+            if ($request->filled('search')) {
+                $search = trim($request->search);
+                $query->where(function ($q) use ($search) {
+                    $q->where('quotation_number', 'like', "%{$search}%")
+                      ->orWhere('customer_name', 'like', "%{$search}%")
+                      ->orWhere('company_name', 'like', "%{$search}%")
+                      ->orWhere('customer_email', 'like', "%{$search}%")
+                      ->orWhere('customer_phone', 'like', "%{$search}%")
+                      ->orWhere('subject', 'like', "%{$search}%");
+                });
+            }
+
+            // Status Filter
+            if ($request->filled('status') && $request->status !== 'all') {
+                $query->where('status', strtolower($request->status));
+            }
+
+            // Filter by Lead ID
+            if ($request->filled('lead_id')) {
+                $query->where('lead_id', $request->lead_id);
+            }
+
+            // Filter by Quotation Date Range
+            if ($request->filled('date')) {
+                $query->whereDate('quotation_date', $request->date);
+            }
+            if ($request->filled('from_date') && $request->filled('to_date')) {
+                $query->whereBetween('quotation_date', [$request->from_date, $request->to_date]);
+            }
+
+            $perPage = (int) $request->get('per_page', 15);
+            $quotations = $query->latest('id')->paginate($perPage);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotations retrieved successfully',
+                'data' => $quotations->items(),
+                'pagination' => [
+                    'current_page' => $quotations->currentPage(),
+                    'last_page' => $quotations->lastPage(),
+                    'per_page' => $quotations->perPage(),
+                    'total' => $quotations->total(),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@index error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching quotations.',
+            ], 500);
         }
-
-        // Search Filter
-        if ($request->filled('search')) {
-            $search = trim($request->search);
-            $query->where(function ($q) use ($search) {
-                $q->where('quotation_number', 'like', "%{$search}%")
-                  ->orWhere('customer_name', 'like', "%{$search}%")
-                  ->orWhere('company_name', 'like', "%{$search}%")
-                  ->orWhere('customer_email', 'like', "%{$search}%")
-                  ->orWhere('customer_phone', 'like', "%{$search}%")
-                  ->orWhere('subject', 'like', "%{$search}%");
-            });
-        }
-
-        // Status Filter
-        if ($request->filled('status') && $request->status !== 'all') {
-            $query->where('status', strtolower($request->status));
-        }
-
-        // Filter by Lead ID
-        if ($request->filled('lead_id')) {
-            $query->where('lead_id', $request->lead_id);
-        }
-
-        // Filter by Quotation Date Range
-        if ($request->filled('date')) {
-            $query->whereDate('quotation_date', $request->date);
-        }
-        if ($request->filled('from_date') && $request->filled('to_date')) {
-            $query->whereBetween('quotation_date', [$request->from_date, $request->to_date]);
-        }
-
-        $perPage = (int) $request->get('per_page', 15);
-        $quotations = $query->latest('id')->paginate($perPage);
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Quotations retrieved successfully',
-            'data' => $quotations->items(),
-            'pagination' => [
-                'current_page' => $quotations->currentPage(),
-                'last_page' => $quotations->lastPage(),
-                'per_page' => $quotations->perPage(),
-                'total' => $quotations->total(),
-            ],
-        ]);
     }
 
     /**
@@ -256,117 +280,131 @@ class QuotationController extends Controller
      */
     public function store(Request $request)
     {
-        $user = auth()->user();
+        try {
+            $user = auth()->user();
 
-        $validated = $request->validate([
-            'lead_id' => 'nullable|exists:leads,id',
-            'quotation_number' => 'nullable|string|max:100|unique:quotations,quotation_number',
-            'quotation_date' => 'required|date',
-            'valid_until' => 'nullable|date',
-            'customer_name' => 'required|string|max:255',
-            'company_name' => 'nullable|string|max:255',
-            'customer_email' => 'nullable|email|max:255',
-            'customer_phone' => 'nullable|string|max:50',
-            'customer_address' => 'nullable|string|max:1000',
-            'subject' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'payment_terms' => 'nullable|string',
-            'delivery_terms' => 'nullable|string',
-            'notes' => 'nullable|string',
-            'status' => 'nullable|in:draft,sent,accepted,rejected,expired',
-            'items' => 'required|array|min:1',
-            'items.*.item_name' => 'required|string|max:255',
-            'items.*.description' => 'nullable|string',
-            'items.*.quantity' => 'required|numeric|min:0.01',
-            'items.*.unit_price' => 'required|numeric|min:0',
-            'items.*.discount' => 'nullable|numeric|min:0',
-            'items.*.tax' => 'nullable|numeric|min:0',
-        ]);
-
-        // Permission check if lead is specified by Sales Executive
-        if ($user && $user->role === 'Sales Executive' && !empty($validated['lead_id'])) {
-            $lead = Lead::find($validated['lead_id']);
-            if ($lead) {
-                $isAssigned = ($lead->assigned_to == $user->id) ||
-                    (stripos($lead->assigned_user_name ?? '', $user->name) !== false);
-                if (!$isAssigned) {
-                    return response()->json([
-                        'status' => false,
-                        'message' => 'You do not have permission to create a quotation for this lead.',
-                    ], 403);
-                }
-            }
-        }
-
-        // Auto-generate unique Quotation Number if empty
-        $quotationNumber = !empty($validated['quotation_number'])
-            ? trim($validated['quotation_number'])
-            : Quotation::generateQuotationNumber();
-
-        // Calculate authoritative financials on backend
-        [$subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems] = $this->calculateFinancials($validated['items']);
-
-        $quotation = DB::transaction(function () use ($validated, $quotationNumber, $subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems, $user) {
-            $quote = Quotation::create([
-                'lead_id' => $validated['lead_id'] ?? null,
-                'quotation_number' => $quotationNumber,
-                'quotation_date' => $validated['quotation_date'],
-                'valid_until' => $validated['valid_until'] ?? null,
-                'customer_name' => $validated['customer_name'],
-                'company_name' => $validated['company_name'] ?? null,
-                'customer_email' => $validated['customer_email'] ?? null,
-                'customer_phone' => $validated['customer_phone'] ?? null,
-                'customer_address' => $validated['customer_address'] ?? null,
-                'subject' => $validated['subject'],
-                'description' => $validated['description'] ?? null,
-                'subtotal' => $subtotal,
-                'discount' => $totalDiscount,
-                'tax' => $totalTax,
-                'grand_total' => $grandTotal,
-                'payment_terms' => $validated['payment_terms'] ?? null,
-                'delivery_terms' => $validated['delivery_terms'] ?? null,
-                'notes' => $validated['notes'] ?? null,
-                'status' => $validated['status'] ?? 'draft',
-                'created_by' => $user?->id,
+            $validated = $request->validate([
+                'lead_id' => 'nullable|exists:leads,id',
+                'quotation_number' => 'nullable|string|max:100|unique:quotations,quotation_number',
+                'quotation_date' => 'required|date',
+                'valid_until' => 'nullable|date',
+                'customer_name' => 'required|string|max:255',
+                'company_name' => 'nullable|string|max:255',
+                'customer_email' => 'nullable|email|max:255',
+                'customer_phone' => 'nullable|string|max:50',
+                'customer_address' => 'nullable|string|max:1000',
+                'subject' => 'required|string|max:255',
+                'description' => 'nullable|string',
+                'payment_terms' => 'nullable|string',
+                'delivery_terms' => 'nullable|string',
+                'notes' => 'nullable|string',
+                'status' => 'nullable|in:draft,sent,accepted,rejected,expired',
+                'items' => 'required|array|min:1',
+                'items.*.item_name' => 'required|string|max:255',
+                'items.*.description' => 'nullable|string',
+                'items.*.quantity' => 'required|numeric|min:0.01',
+                'items.*.unit_price' => 'required|numeric|min:0',
+                'items.*.discount' => 'nullable|numeric|min:0',
+                'items.*.tax' => 'nullable|numeric|min:0',
             ]);
 
-            foreach ($processedItems as $itemData) {
-                $itemData['quotation_id'] = $quote->id;
-                QuotationItem::create($itemData);
+            // Permission check if lead is specified by Sales Executive
+            if ($user && $user->role === 'Sales Executive' && !empty($validated['lead_id'])) {
+                $lead = Lead::find($validated['lead_id']);
+                if ($lead) {
+                    $isAssigned = ($lead->assigned_to == $user->id) ||
+                        (stripos($lead->assigned_user_name ?? '', $user->name) !== false);
+                    if (!$isAssigned) {
+                        return response()->json([
+                            'status' => false,
+                            'message' => 'You do not have permission to create a quotation for this lead.',
+                        ], 403);
+                    }
+                }
             }
 
-            return $quote;
-        });
+            // Auto-generate unique Quotation Number if empty
+            $quotationNumber = !empty($validated['quotation_number'])
+                ? trim($validated['quotation_number'])
+                : Quotation::generateQuotationNumber();
 
-        $quotation->load(['items', 'lead', 'creator']);
+            // Calculate authoritative financials on backend
+            [$subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems] = $this->calculateFinancials($validated['items']);
 
-        // If quotation is created directly with 'sent' status and linked to a lead, log follow-up entry
-        if (($validated['status'] ?? 'draft') === 'sent' && !empty($validated['lead_id'])) {
-            $lead = Lead::find($validated['lead_id']);
-            if ($lead) {
-                LeadFollowUp::create([
-                    'lead_id' => $lead->id,
-                    'user_id' => $user?->id ?? ($lead->assigned_to ?? 1),
-                    'follow_up_date' => now()->toDateString(),
-                    'follow_up_time' => now()->format('h:i A'),
-                    'type' => 'Email',
-                    'notes' => "Quotation Sent: Official Quotation #{$quotationNumber} generated & sent for {$validated['subject']} (Grand Total: ₹" . number_format($grandTotal, 2) . ").",
-                    'status' => 'Completed',
+            $quotation = DB::transaction(function () use ($validated, $quotationNumber, $subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems, $user) {
+                $quote = Quotation::create([
+                    'lead_id' => $validated['lead_id'] ?? null,
+                    'quotation_number' => $quotationNumber,
+                    'quotation_date' => $validated['quotation_date'],
+                    'valid_until' => $validated['valid_until'] ?? null,
+                    'customer_name' => $validated['customer_name'],
+                    'company_name' => $validated['company_name'] ?? null,
+                    'customer_email' => $validated['customer_email'] ?? null,
+                    'customer_phone' => $validated['customer_phone'] ?? null,
+                    'customer_address' => $validated['customer_address'] ?? null,
+                    'subject' => $validated['subject'],
+                    'description' => $validated['description'] ?? null,
+                    'subtotal' => $subtotal,
+                    'discount' => $totalDiscount,
+                    'tax' => $totalTax,
+                    'grand_total' => $grandTotal,
+                    'payment_terms' => $validated['payment_terms'] ?? null,
+                    'delivery_terms' => $validated['delivery_terms'] ?? null,
+                    'notes' => $validated['notes'] ?? null,
+                    'status' => $validated['status'] ?? 'draft',
+                    'created_by' => $user?->id,
                 ]);
 
-                $quotationSentStatus = LeadStatus::where('name', 'Quotation Sent')->first();
-                $lead->update([
-                    'status_name' => 'Quotation Sent',
-                    'status_id' => $quotationSentStatus ? $quotationSentStatus->id : $lead->status_id,
-                ]);
+                foreach ($processedItems as $itemData) {
+                    $itemData['quotation_id'] = $quote->id;
+                    QuotationItem::create($itemData);
+                }
+
+                return $quote;
+            });
+
+            $quotation->load(['items', 'lead', 'creator']);
+
+            // If quotation is created directly with 'sent' status and linked to a lead, log follow-up entry
+            if (($validated['status'] ?? 'draft') === 'sent' && !empty($validated['lead_id'])) {
+                $lead = Lead::find($validated['lead_id']);
+                if ($lead) {
+                    LeadFollowUp::create([
+                        'lead_id' => $lead->id,
+                        'user_id' => $user?->id ?? ($lead->assigned_to ?? 1),
+                        'follow_up_date' => now()->toDateString(),
+                        'follow_up_time' => now()->format('h:i A'),
+                        'type' => 'Email',
+                        'notes' => "Quotation Sent: Official Quotation #{$quotationNumber} generated & sent for {$validated['subject']} (Grand Total: ₹" . number_format($grandTotal, 2) . ").",
+                        'status' => 'Completed',
+                    ]);
+
+                    $quotationSentStatus = LeadStatus::where('name', 'Quotation Sent')->first();
+                    $lead->update([
+                        'status_name' => 'Quotation Sent',
+                        'status_id' => $quotationSentStatus ? $quotationSentStatus->id : $lead->status_id,
+                    ]);
+                }
             }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotation created successfully',
+                'data' => $quotation,
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@store error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while creating quotation.',
+            ], 500);
         }
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Quotation created successfully',
-            'data' => $quotation,
-        ], 201);
     }
 
     /**
@@ -374,38 +412,46 @@ class QuotationController extends Controller
      */
     public function show($id)
     {
-        $user = auth()->user();
+        try {
+            $user = auth()->user();
 
-        $quotation = Quotation::with([
-            'items',
-            'lead:id,name,phone,email,model_variant,brand_name,vehicle_segment,city,state,assigned_to,assigned_user_name',
-            'creator:id,name,email,role',
-        ])->find($id);
+            $quotation = Quotation::with([
+                'items',
+                'lead:id,name,phone,email,model_variant,brand_name,vehicle_segment,city,state,assigned_to,assigned_user_name',
+                'creator:id,name,email,role',
+            ])->find($id);
 
-        if (!$quotation) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Quotation not found.',
-            ], 404);
-        }
-
-        // Permission check for Sales Executive
-        if ($user && $user->role === 'Sales Executive') {
-            $hasAccess = ($quotation->created_by == $user->id) ||
-                ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
-            if (!$hasAccess) {
+            if (!$quotation) {
                 return response()->json([
                     'status' => false,
-                    'message' => 'You do not have permission to view this quotation.',
-                ], 403);
+                    'message' => 'Quotation not found.',
+                ], 404);
             }
-        }
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Quotation details retrieved successfully',
-            'data' => $quotation,
-        ]);
+            // Permission check for Sales Executive
+            if ($user && $user->role === 'Sales Executive') {
+                $hasAccess = ($quotation->created_by == $user->id) ||
+                    ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
+                if (!$hasAccess) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'You do not have permission to view this quotation.',
+                    ], 403);
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotation details retrieved successfully',
+                'data' => $quotation,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@show error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching quotation details.',
+            ], 500);
+        }
     }
 
     /**
@@ -413,94 +459,108 @@ class QuotationController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $user = auth()->user();
+        try {
+            $user = auth()->user();
 
-        $quotation = Quotation::with('lead')->find($id);
+            $quotation = Quotation::with('lead')->find($id);
 
-        if (!$quotation) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Quotation not found.',
-            ], 404);
-        }
-
-        // Permission check for Sales Executive
-        if ($user && $user->role === 'Sales Executive') {
-            $hasAccess = ($quotation->created_by == $user->id) ||
-                ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
-            if (!$hasAccess) {
+            if (!$quotation) {
                 return response()->json([
                     'status' => false,
-                    'message' => 'You do not have permission to modify this quotation.',
-                ], 403);
+                    'message' => 'Quotation not found.',
+                ], 404);
             }
-        }
 
-        $validated = $request->validate([
-            'lead_id' => 'nullable|exists:leads,id',
-            'quotation_number' => 'nullable|string|max:100|unique:quotations,quotation_number,' . $id,
-            'quotation_date' => 'required|date',
-            'valid_until' => 'nullable|date',
-            'customer_name' => 'required|string|max:255',
-            'company_name' => 'nullable|string|max:255',
-            'customer_email' => 'nullable|email|max:255',
-            'customer_phone' => 'nullable|string|max:50',
-            'customer_address' => 'nullable|string|max:1000',
-            'subject' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'payment_terms' => 'nullable|string',
-            'delivery_terms' => 'nullable|string',
-            'notes' => 'nullable|string',
-            'status' => 'nullable|in:draft,sent,accepted,rejected,expired',
-            'items' => 'required|array|min:1',
-            'items.*.item_name' => 'required|string|max:255',
-            'items.*.description' => 'nullable|string',
-            'items.*.quantity' => 'required|numeric|min:0.01',
-            'items.*.unit_price' => 'required|numeric|min:0',
-            'items.*.discount' => 'nullable|numeric|min:0',
-            'items.*.tax' => 'nullable|numeric|min:0',
-        ]);
+            // Permission check for Sales Executive
+            if ($user && $user->role === 'Sales Executive') {
+                $hasAccess = ($quotation->created_by == $user->id) ||
+                    ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
+                if (!$hasAccess) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'You do not have permission to modify this quotation.',
+                    ], 403);
+                }
+            }
 
-        [$subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems] = $this->calculateFinancials($validated['items']);
-
-        DB::transaction(function () use ($quotation, $validated, $subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems) {
-            $quotation->update([
-                'lead_id' => $validated['lead_id'] ?? $quotation->lead_id,
-                'quotation_number' => $validated['quotation_number'] ?? $quotation->quotation_number,
-                'quotation_date' => $validated['quotation_date'],
-                'valid_until' => $validated['valid_until'] ?? null,
-                'customer_name' => $validated['customer_name'],
-                'company_name' => $validated['company_name'] ?? null,
-                'customer_email' => $validated['customer_email'] ?? null,
-                'customer_phone' => $validated['customer_phone'] ?? null,
-                'customer_address' => $validated['customer_address'] ?? null,
-                'subject' => $validated['subject'],
-                'description' => $validated['description'] ?? null,
-                'subtotal' => $subtotal,
-                'discount' => $totalDiscount,
-                'tax' => $totalTax,
-                'grand_total' => $grandTotal,
-                'payment_terms' => $validated['payment_terms'] ?? null,
-                'delivery_terms' => $validated['delivery_terms'] ?? null,
-                'notes' => $validated['notes'] ?? null,
-                'status' => $validated['status'] ?? $quotation->status,
+            $validated = $request->validate([
+                'lead_id' => 'nullable|exists:leads,id',
+                'quotation_number' => 'nullable|string|max:100|unique:quotations,quotation_number,' . $id,
+                'quotation_date' => 'required|date',
+                'valid_until' => 'nullable|date',
+                'customer_name' => 'required|string|max:255',
+                'company_name' => 'nullable|string|max:255',
+                'customer_email' => 'nullable|email|max:255',
+                'customer_phone' => 'nullable|string|max:50',
+                'customer_address' => 'nullable|string|max:1000',
+                'subject' => 'required|string|max:255',
+                'description' => 'nullable|string',
+                'payment_terms' => 'nullable|string',
+                'delivery_terms' => 'nullable|string',
+                'notes' => 'nullable|string',
+                'status' => 'nullable|in:draft,sent,accepted,rejected,expired',
+                'items' => 'required|array|min:1',
+                'items.*.item_name' => 'required|string|max:255',
+                'items.*.description' => 'nullable|string',
+                'items.*.quantity' => 'required|numeric|min:0.01',
+                'items.*.unit_price' => 'required|numeric|min:0',
+                'items.*.discount' => 'nullable|numeric|min:0',
+                'items.*.tax' => 'nullable|numeric|min:0',
             ]);
 
-            // Sync items: remove old ones and insert recalculated items
-            $quotation->items()->delete();
-            foreach ($processedItems as $itemData) {
-                $itemData['quotation_id'] = $quotation->id;
-                QuotationItem::create($itemData);
-            }
-        });
+            [$subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems] = $this->calculateFinancials($validated['items']);
 
-        $quotation->load(['items', 'lead', 'creator']);
+            DB::transaction(function () use ($quotation, $validated, $subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems) {
+                $quotation->update([
+                    'lead_id' => $validated['lead_id'] ?? $quotation->lead_id,
+                    'quotation_number' => $validated['quotation_number'] ?? $quotation->quotation_number,
+                    'quotation_date' => $validated['quotation_date'],
+                    'valid_until' => $validated['valid_until'] ?? null,
+                    'customer_name' => $validated['customer_name'],
+                    'company_name' => $validated['company_name'] ?? null,
+                    'customer_email' => $validated['customer_email'] ?? null,
+                    'customer_phone' => $validated['customer_phone'] ?? null,
+                    'customer_address' => $validated['customer_address'] ?? null,
+                    'subject' => $validated['subject'],
+                    'description' => $validated['description'] ?? null,
+                    'subtotal' => $subtotal,
+                    'discount' => $totalDiscount,
+                    'tax' => $totalTax,
+                    'grand_total' => $grandTotal,
+                    'payment_terms' => $validated['payment_terms'] ?? null,
+                    'delivery_terms' => $validated['delivery_terms'] ?? null,
+                    'notes' => $validated['notes'] ?? null,
+                    'status' => $validated['status'] ?? $quotation->status,
+                ]);
 
-        return response()->json([
-            'status' => true,
-            'message' => 'Quotation updated successfully',
-            'data' => $quotation,
-        ]);
+                // Sync items: remove old ones and insert recalculated items
+                $quotation->items()->delete();
+                foreach ($processedItems as $itemData) {
+                    $itemData['quotation_id'] = $quotation->id;
+                    QuotationItem::create($itemData);
+                }
+            });
+
+            $quotation->load(['items', 'lead', 'creator']);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotation updated successfully',
+                'data' => $quotation,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@update error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while updating quotation.',
+            ], 500);
+        }
     }
 
     /**
@@ -508,35 +568,43 @@ class QuotationController extends Controller
      */
     public function destroy($id)
     {
-        $user = auth()->user();
+        try {
+            $user = auth()->user();
 
-        $quotation = Quotation::with('lead')->find($id);
+            $quotation = Quotation::with('lead')->find($id);
 
-        if (!$quotation) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Quotation not found.',
-            ], 404);
-        }
-
-        // Permission check for Sales Executive
-        if ($user && $user->role === 'Sales Executive') {
-            $hasAccess = ($quotation->created_by == $user->id) ||
-                ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
-            if (!$hasAccess) {
+            if (!$quotation) {
                 return response()->json([
                     'status' => false,
-                    'message' => 'You do not have permission to delete this quotation.',
-                ], 403);
+                    'message' => 'Quotation not found.',
+                ], 404);
             }
+
+            // Permission check for Sales Executive
+            if ($user && $user->role === 'Sales Executive') {
+                $hasAccess = ($quotation->created_by == $user->id) ||
+                    ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
+                if (!$hasAccess) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'You do not have permission to delete this quotation.',
+                    ], 403);
+                }
+            }
+
+            $quotation->delete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotation deleted successfully',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@destroy error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while deleting quotation.',
+            ], 500);
         }
-
-        $quotation->delete();
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Quotation deleted successfully',
-        ]);
     }
 
     /**
@@ -544,39 +612,39 @@ class QuotationController extends Controller
      */
     public function sendEmail(Request $request, $id)
     {
-        $user = auth()->user();
+        try {
+            $user = auth()->user();
 
-        $quotation = Quotation::with(['items', 'lead', 'creator'])->find($id);
+            $quotation = Quotation::with(['items', 'lead', 'creator'])->find($id);
 
-        if (!$quotation) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Quotation not found.',
-            ], 404);
-        }
-
-        // Permission check for Sales Executive
-        if ($user && $user->role === 'Sales Executive') {
-            $hasAccess = ($quotation->created_by == $user->id) ||
-                ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
-            if (!$hasAccess) {
+            if (!$quotation) {
                 return response()->json([
                     'status' => false,
-                    'message' => 'You do not have permission to send this quotation.',
-                ], 403);
+                    'message' => 'Quotation not found.',
+                ], 404);
             }
-        }
 
-        $recipientEmail = trim($request->input('recipient_email', $quotation->customer_email));
+            // Permission check for Sales Executive
+            if ($user && $user->role === 'Sales Executive') {
+                $hasAccess = ($quotation->created_by == $user->id) ||
+                    ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
+                if (!$hasAccess) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'You do not have permission to send this quotation.',
+                    ], 403);
+                }
+            }
 
-        if (empty($recipientEmail) || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
-            return response()->json([
-                'status' => false,
-                'message' => 'A valid customer email address is required to send the quotation.',
-            ], 422);
-        }
+            $recipientEmail = trim($request->input('recipient_email', $quotation->customer_email));
 
-        try {
+            if (empty($recipientEmail) || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'A valid customer email address is required to send the quotation.',
+                ], 422);
+            }
+
             // Send email using Mailable
             Mail::to($recipientEmail)->send(new QuotationMailable(
                 $quotation,
@@ -634,33 +702,41 @@ class QuotationController extends Controller
      */
     public function downloadPdf($id)
     {
-        $user = auth()->user();
+        try {
+            $user = auth()->user();
 
-        $quotation = Quotation::with(['items', 'lead', 'creator'])->find($id);
+            $quotation = Quotation::with(['items', 'lead', 'creator'])->find($id);
 
-        if (!$quotation) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Quotation not found.',
-            ], 404);
-        }
-
-        // Permission check for Sales Executive
-        if ($user && $user->role === 'Sales Executive') {
-            $hasAccess = ($quotation->created_by == $user->id) ||
-                ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
-            if (!$hasAccess) {
+            if (!$quotation) {
                 return response()->json([
                     'status' => false,
-                    'message' => 'You do not have permission to access this quotation.',
-                ], 403);
+                    'message' => 'Quotation not found.',
+                ], 404);
             }
+
+            // Permission check for Sales Executive
+            if ($user && $user->role === 'Sales Executive') {
+                $hasAccess = ($quotation->created_by == $user->id) ||
+                    ($quotation->lead && ($quotation->lead->assigned_to == $user->id || stripos($quotation->lead->assigned_user_name ?? '', $user->name) !== false));
+                if (!$hasAccess) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'You do not have permission to access this quotation.',
+                    ], 403);
+                }
+            }
+
+            $pdf = Pdf::loadView('pdf.quotation', ['quotation' => $quotation]);
+            $fileName = "Quotation-{$quotation->quotation_number}.pdf";
+
+            return $pdf->download($fileName);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@downloadPdf error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while generating PDF.',
+            ], 500);
         }
-
-        $pdf = Pdf::loadView('pdf.quotation', ['quotation' => $quotation]);
-        $fileName = "Quotation-{$quotation->quotation_number}.pdf";
-
-        return $pdf->download($fileName);
     }
 
     /**
