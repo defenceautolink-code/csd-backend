@@ -50,7 +50,8 @@ Route::apiResource('brands', BrandController::class);
 // Vehicle Model Master CRUD API
 Route::apiResource('models', VehicleModelController::class);
 
-// Vehicle Variant Master CRUD API
+// Vehicle Variant Master CRUD & Bulk Price Update API
+Route::post('variants/bulk-update-prices', [VehicleVariantController::class, 'bulkUpdatePrices']);
 Route::apiResource('variants', VehicleVariantController::class);
 
 // Customer Leads Bulk Operations API

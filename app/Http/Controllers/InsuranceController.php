@@ -18,15 +18,11 @@ class InsuranceController extends Controller
     public function index(Request $request)
     {
         try {
-            $insurances = Insurance::with(['deal'])->get();
-            $dealIdsInInsurance = $insurances->pluck('deal_id')->filter()->toArray();
-
-            // Fetch Deals that may not have an explicit Insurance record created yet
-            $dealsWithoutInsurance = Deal::whereNotIn('id', $dealIdsInInsurance)->get();
+            $insurances = Insurance::with(['deal'])->latest('id')->get();
 
             $records = collect();
 
-            // 1. Process Insurance table records
+            // Process only Insurance table records
             foreach ($insurances as $ins) {
                 $deliveryDate = $ins->delivery_date 
                     ?? $ins->start_date 
@@ -45,12 +41,13 @@ class InsuranceController extends Controller
                 $reminderDate = Carbon::parse($expireDate)->subDays(15)->format('Y-m-d');
 
                 // Computed Status
-                $today = Carbon::today()->format('Y-m-d');
+                $todayStr = Carbon::today()->format('Y-m-d');
+
                 $status = $ins->status;
                 if ($status !== 'renewed') {
-                    if ($today > $expireDate) {
+                    if ($todayStr > $expireDate) {
                         $status = 'expired';
-                    } elseif ($today >= $reminderDate) {
+                    } elseif ($todayStr >= $reminderDate) {
                         $status = 'expiring_soon';
                     } else {
                         $status = 'active';
@@ -66,42 +63,6 @@ class InsuranceController extends Controller
                     'customer_city' => $ins->deal?->customer_city ?? $ins->customer_address ?? '',
                     'model_variant' => $ins->vehicle_name ?? $ins->deal?->model_variant ?? '',
                     'color' => $ins->deal?->color ?? '',
-                    'delivery_date' => Carbon::parse($deliveryDate)->format('Y-m-d'),
-                    'insurance_expire_date' => Carbon::parse($expireDate)->format('Y-m-d'),
-                    'reminder_date' => $reminderDate,
-                    'status' => $status,
-                ]);
-            }
-
-            // 2. Process Deals without explicit insurance record
-            foreach ($dealsWithoutInsurance as $deal) {
-                $deliveryDate = $deal->actual_delivery_date 
-                    ?? $deal->expected_delivery_date 
-                    ?? $deal->booking_date 
-                    ?? $deal->created_at->format('Y-m-d');
-
-                $deliveryCarbon = Carbon::parse($deliveryDate);
-                $expireDate = $deliveryCarbon->copy()->addDays(365)->format('Y-m-d'); // 365 days after delivery
-                $reminderDate = Carbon::parse($expireDate)->subDays(15)->format('Y-m-d'); // 15 days before expire date
-
-                $today = Carbon::today()->format('Y-m-d');
-                if ($today > $expireDate) {
-                    $status = 'expired';
-                } elseif ($today >= $reminderDate) {
-                    $status = 'expiring_soon';
-                } else {
-                    $status = 'active';
-                }
-
-                $records->push([
-                    'id' => $deal->id,
-                    'deal_id' => $deal->id,
-                    'customer_name' => $deal->customer_name ?? '',
-                    'customer_number' => $deal->customer_phone ?? '',
-                    'customer_email' => $deal->customer_email ?? '',
-                    'customer_city' => $deal->customer_city ?? '',
-                    'model_variant' => $deal->model_variant ?? '',
-                    'color' => $deal->color ?? '',
                     'delivery_date' => Carbon::parse($deliveryDate)->format('Y-m-d'),
                     'insurance_expire_date' => Carbon::parse($expireDate)->format('Y-m-d'),
                     'reminder_date' => $reminderDate,
@@ -152,19 +113,35 @@ class InsuranceController extends Controller
                 $records = $records->filter(fn($item) => (string) $item['deal_id'] === (string) $dealId);
             }
 
-            // Status Filter (reminders_due, expiring_soon, expired, active)
-            $statusInput = $request->input('status') ?? $request->input('reminder_status');
-            if (!empty($statusInput)) {
-                $statusVal = strtolower(trim($statusInput));
-                $today = Carbon::today()->format('Y-m-d');
+            // -----------------------------------------------------------------
+            // NEXT 15 DAYS EXPIRY FILTER (Today to Today + 15 Days)
+            // -----------------------------------------------------------------
+            $today = Carbon::today()->format('Y-m-d');
+            $daysCount = (int) ($request->get('days') ?? 15);
+            $targetExpiryEnd = Carbon::today()->addDays($daysCount)->format('Y-m-d');
 
-                if (in_array($statusVal, ['reminders_due', 'expiring_soon', 'due_reminders', 'reminder_due'])) {
-                    $records = $records->filter(fn($item) => $item['reminder_date'] <= $today && $item['insurance_expire_date'] >= $today);
+            $showAll = $request->boolean('all') 
+                || $request->get('status') === 'all' 
+                || $request->get('filter') === 'all';
+
+            // Status & Reminder Filters
+            $statusInput = $request->input('status') ?? $request->input('reminder_status');
+
+            if (!empty($statusInput) && $statusInput !== 'all') {
+                $statusVal = strtolower(trim($statusInput));
+
+                if (in_array($statusVal, ['reminders_due', 'expiring_soon', 'due_reminders', 'reminder_due', 'near_expiry', 'near_reminder', 'due', 'next_15_days'])) {
+                    $records = $records->filter(fn($item) => $item['insurance_expire_date'] >= $today && $item['insurance_expire_date'] <= $targetExpiryEnd);
                 } elseif ($statusVal === 'expired') {
                     $records = $records->filter(fn($item) => $item['insurance_expire_date'] < $today);
                 } elseif ($statusVal === 'active') {
                     $records = $records->filter(fn($item) => $item['insurance_expire_date'] > $today);
+                } elseif ($statusVal === 'renewed') {
+                    $records = $records->filter(fn($item) => $item['status'] === 'renewed');
                 }
+            } elseif (!$showAll && !$request->filled('insurance_expire_date') && !$request->filled('expiry_date') && !$request->filled('from_date') && !$request->filled('to_date') && !$request->filled('date')) {
+                // By default: Fetch only records whose insurance_expire_date falls between Today and Today + 15 Days
+                $records = $records->filter(fn($item) => $item['insurance_expire_date'] >= $today && $item['insurance_expire_date'] <= $targetExpiryEnd);
             }
 
             // -----------------------------------------------------------------
@@ -173,6 +150,17 @@ class InsuranceController extends Controller
             $dateField = $request->input('date_field', 'insurance_expire_date');
             if (!in_array($dateField, ['delivery_date', 'insurance_expire_date', 'reminder_date'])) {
                 $dateField = 'insurance_expire_date';
+            }
+
+            // Direct field matches (e.g., expiry_date, insurance_expire_date, reminder_date)
+            if ($request->filled('insurance_expire_date') || $request->filled('expiry_date')) {
+                $expVal = $request->input('insurance_expire_date') ?? $request->input('expiry_date');
+                $records = $records->filter(fn($item) => $item['insurance_expire_date'] === $expVal);
+            }
+
+            if ($request->filled('reminder_date')) {
+                $remVal = $request->input('reminder_date');
+                $records = $records->filter(fn($item) => $item['reminder_date'] === $remVal);
             }
 
             $startDate = $request->input('from_date') ?? $request->input('start_date') ?? $request->input('startDate') ?? $request->input('date_from');
@@ -193,14 +181,8 @@ class InsuranceController extends Controller
             // Sort records by insurance expire date ascending
             $records = $records->sortBy('insurance_expire_date')->values();
 
-            // -----------------------------------------------------------------
-            // PAGINATION
-            // -----------------------------------------------------------------
             $total = $records->count();
-            $isAll = $request->boolean('all') 
-                || $request->get('per_page') === 'all' 
-                || (int) $request->get('per_page') === -1 
-                || $request->get('paginate') === 'false';
+            $isAll = $request->boolean('all') || $request->get('per_page') === 'all';
 
             if ($isAll) {
                 return response()->json([

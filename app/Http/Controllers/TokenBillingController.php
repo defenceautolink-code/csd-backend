@@ -329,7 +329,7 @@ class TokenBillingController extends Controller
             InstallmentInvoice::query()->delete();
 
             // Trigger Seeder
-            app(\Database\Seeders\CustomerTokenSeeder::class)->run();
+            // app(\Database\Seeders\CustomerTokenSeeder::class)->run();
 
             return response()->json([
                 'status' => true,

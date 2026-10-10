@@ -195,6 +195,7 @@ class DealController extends Controller
                     'payment_terms' => $latestQuotation?->payment_terms ?? 'Booking token advance on order, balance payment before vehicle registration and delivery.',
                     'delivery_terms' => $latestQuotation?->delivery_terms ?? 'Subject to vehicle allocation, PDI clearance, and full payment receipt.',
                     'notes' => "Converted from Lead #{$lead->id} (" . ($lead->name) . ")",
+                    'insurance' => 'Yes',
                 ],
             ]);
         } catch (\Throwable $e) {
@@ -240,6 +241,28 @@ class DealController extends Controller
                 'bank_name' => 'nullable|string|max:100',
                 'bank' => 'nullable|string|max:100',
 
+                // Optional Customer details overrides
+                'customer_name' => 'nullable|string|max:255',
+                'customer_email' => 'nullable|email|max:255',
+                'customer_phone' => 'nullable|string|max:50',
+                'customer_city' => 'nullable|string|max:100',
+                'customer_state' => 'nullable|string|max:100',
+                'customer_address' => 'nullable|string',
+
+                // Optional Vehicle & Brand details
+                'vehicle_segment' => 'nullable|string|max:50',
+                'brand_id' => 'nullable',
+                'brand_name' => 'nullable|string|max:100',
+                'model_variant' => 'nullable|string|max:255',
+
+                // Optional Insurance flag & details ('Yes' to create insurance record)
+                'insurance' => 'nullable',
+                'insurance_premium' => 'nullable|numeric|min:0',
+                'premium_amount' => 'nullable|numeric|min:0',
+                'insurance_amount' => 'nullable|numeric|min:0',
+                'idv_amount' => 'nullable|numeric|min:0',
+                'insurance_notes' => 'nullable|string',
+
                 // Optional Initial Payment details
                 'initial_payment' => 'nullable|array',
                 'initial_payment.amount' => 'nullable|numeric|min:1',
@@ -266,25 +289,75 @@ class DealController extends Controller
                 $discountAmount = (float) ($validated['discount_amount'] ?? 0);
                 $netAmount = max(0.0, $totalAmount - $discountAmount);
 
+                // Resolve Brand ID safely (validate against brands table to prevent 1452 foreign key error)
+                $brandId = $validated['brand_id'] ?? $request->input('brand_id') ?? $lead->brand_id;
+                $brandName = $validated['brand_name'] ?? $request->input('brand_name') ?? $lead->brand_name;
+
+                if (!empty($brandId)) {
+                    $brandExists = DB::table('brands')->where('id', $brandId)->exists();
+                    if (!$brandExists) {
+                        // If provided brand_id does not exist, try finding brand by name or set to null
+                        if (!empty($brandName)) {
+                            $foundBrand = DB::table('brands')->where('name', $brandName)->first();
+                            $brandId = $foundBrand?->id;
+                        } else {
+                            $brandId = null;
+                        }
+                    }
+                } elseif (!empty($brandName)) {
+                    $foundBrand = DB::table('brands')->where('name', $brandName)->first();
+                    $brandId = $foundBrand?->id;
+                } else {
+                    $brandId = null;
+                }
+
+                // Resolve Quotation ID safely
+                $quotationId = $validated['quotation_id'] ?? $request->input('quotation_id') ?? null;
+                if ($quotationId && !DB::table('quotations')->where('id', $quotationId)->exists()) {
+                    $quotationId = null;
+                }
+
+                // Resolve Sales Executive ID safely
+                $salesExecId = $validated['sales_executive_id'] ?? $request->input('sales_executive_id') ?? $lead->assigned_to ?? $user?->id;
+                if ($salesExecId && !DB::table('users')->where('id', $salesExecId)->exists()) {
+                    $salesExecId = ($user?->id && DB::table('users')->where('id', $user->id)->exists()) ? $user->id : null;
+                }
+                $salesExecName = $validated['sales_executive_name'] ?? $request->input('sales_executive_name') ?? $lead->assigned_user_name ?? $user?->name;
+
+                // Resolve Creator ID safely
+                $creatorId = $user?->id;
+                if ($creatorId && !DB::table('users')->where('id', $creatorId)->exists()) {
+                    $creatorId = null;
+                }
+
+                $customerName = $validated['customer_name'] ?? $request->input('customer_name') ?? $lead->name;
+                $customerEmail = $validated['customer_email'] ?? $request->input('customer_email') ?? $lead->email;
+                $customerPhone = $validated['customer_phone'] ?? $request->input('customer_phone') ?? $lead->phone;
+                $customerCity = $validated['customer_city'] ?? $request->input('customer_city') ?? $lead->city;
+                $customerState = $validated['customer_state'] ?? $request->input('customer_state') ?? $lead->state;
+                $customerAddress = $validated['customer_address'] ?? $request->input('customer_address') ?? trim(implode(', ', array_filter([$customerCity, $customerState])));
+                $vehicleSegment = $validated['vehicle_segment'] ?? $request->input('vehicle_segment') ?? $lead->vehicle_segment ?? '4 Wheeler';
+                $modelVariant = $validated['model_variant'] ?? $request->input('model_variant') ?? $lead->model_variant;
+
                 // Create Deal record
                 $deal = Deal::create([
                     'deal_number' => Deal::generateDealNumber(),
                     'lead_id' => $lead->id,
-                    'quotation_id' => $validated['quotation_id'] ?? null,
-                    'customer_name' => $lead->name,
-                    'customer_email' => $lead->email,
-                    'customer_phone' => $lead->phone,
-                    'customer_city' => $lead->city,
-                    'customer_state' => $lead->state,
-                    'customer_address' => trim(implode(', ', array_filter([$lead->city, $lead->state]))),
-                    'vehicle_segment' => $lead->vehicle_segment ?? '4 Wheeler',
-                    'brand_id' => $lead->brand_id,
-                    'brand_name' => $lead->brand_name,
-                    'model_variant' => $lead->model_variant,
-                    'color' => $validated['color'] ?? null,
-                    'vin_chassis_number' => $validated['vin_chassis_number'] ?? null,
-                    'engine_number' => $validated['engine_number'] ?? null,
-                    'registration_number' => $validated['registration_number'] ?? null,
+                    'quotation_id' => $quotationId,
+                    'customer_name' => $customerName,
+                    'customer_email' => $customerEmail,
+                    'customer_phone' => $customerPhone,
+                    'customer_city' => $customerCity,
+                    'customer_state' => $customerState,
+                    'customer_address' => $customerAddress,
+                    'vehicle_segment' => $vehicleSegment,
+                    'brand_id' => $brandId,
+                    'brand_name' => $brandName,
+                    'model_variant' => $modelVariant,
+                    'color' => $validated['color'] ?? $request->input('color') ?? null,
+                    'vin_chassis_number' => $validated['vin_chassis_number'] ?? $request->input('vin_chassis_number') ?? null,
+                    'engine_number' => $validated['engine_number'] ?? $request->input('engine_number') ?? null,
+                    'registration_number' => $validated['registration_number'] ?? $request->input('registration_number') ?? null,
                     'total_amount' => $totalAmount,
                     'discount_amount' => $discountAmount,
                     'net_amount' => $netAmount,
@@ -294,39 +367,84 @@ class DealController extends Controller
                     'deal_status' => $validated['deal_status'] ?? 'booking_confirmed',
                     'booking_date' => $validated['booking_date'] ?? now()->format('Y-m-d'),
                     'expected_delivery_date' => $validated['expected_delivery_date'] ?? null,
-                    'sales_executive_id' => $validated['sales_executive_id'] ?? $lead->assigned_to ?? $user?->id,
-                    'sales_executive_name' => $validated['sales_executive_name'] ?? $lead->assigned_user_name ?? $user?->name,
-                    'created_by' => $user?->id,
+                    'sales_executive_id' => $salesExecId,
+                    'sales_executive_name' => $salesExecName,
+                    'created_by' => $creatorId,
                     'payment_terms' => $validated['payment_terms'] ?? null,
                     'delivery_terms' => $validated['delivery_terms'] ?? null,
                     'notes' => $validated['notes'] ?? null,
                 ]);
 
-                // Automatically create Insurance record for this Deal
-                $delivDate = $deal->actual_delivery_date ?? $deal->expected_delivery_date ?? $deal->booking_date ?? now()->format('Y-m-d');
-                $expireDate = \Illuminate\Support\Carbon::parse($delivDate)->addDays(365)->format('Y-m-d');
+                // Conditionally create Insurance record for this Deal only when insurance is 'Yes'
+                $insuranceInput = $validated['insurance'] ?? $request->input('insurance');
+                $shouldCreateInsurance = false;
 
-                Insurance::create([
-                    'deal_id' => $deal->id,
-                    'lead_id' => $lead->id,
-                    'customer_name' => $deal->customer_name,
-                    'customer_phone' => $deal->customer_phone,
-                    'customer_email' => $deal->customer_email,
-                    'customer_address' => $deal->customer_city,
-                    'vehicle_name' => $deal->model_variant,
-                    'registration_number' => $deal->registration_number,
-                    'vin_chassis_number' => $deal->vin_chassis_number,
-                    'engine_number' => $deal->engine_number,
-                    'premium_amount' => 0.00,
-                    'delivery_date' => $delivDate,
-                    'start_date' => $delivDate,
-                    'expiry_date' => $expireDate,
-                    'next_insurance_date' => $expireDate,
-                    'status' => 'active',
-                    'created_by' => $user?->id,
-                    'sales_executive_id' => $deal->sales_executive_id,
-                    'sales_executive_name' => $deal->sales_executive_name,
-                ]);
+                if (is_string($insuranceInput)) {
+                    $cleaned = strtolower(trim($insuranceInput));
+                    $shouldCreateInsurance = in_array($cleaned, ['yes', 'y', 'true', '1']);
+                } elseif (is_bool($insuranceInput)) {
+                    $shouldCreateInsurance = $insuranceInput;
+                } elseif (is_numeric($insuranceInput)) {
+                    $shouldCreateInsurance = (int) $insuranceInput === 1;
+                } elseif (is_array($insuranceInput)) {
+                    $status = $insuranceInput['status'] ?? $insuranceInput['insurance'] ?? null;
+                    if (is_string($status)) {
+                        $shouldCreateInsurance = in_array(strtolower(trim($status)), ['yes', 'y', 'true', '1']);
+                    } else {
+                        $shouldCreateInsurance = !empty($status);
+                    }
+                }
+
+                if ($shouldCreateInsurance) {
+                    $delivDate = $deal->actual_delivery_date 
+                        ?? $deal->expected_delivery_date 
+                        ?? $deal->booking_date 
+                        ?? now()->format('Y-m-d');
+                    $expireDate = \Illuminate\Support\Carbon::parse($delivDate)->addDays(365)->format('Y-m-d');
+
+                    $premiumAmount = (float) (
+                        $validated['premium_amount'] 
+                        ?? $validated['insurance_premium'] 
+                        ?? $validated['insurance_amount'] 
+                        ?? $request->input('premium_amount') 
+                        ?? $request->input('insurance_premium') 
+                        ?? $request->input('insurance_amount') 
+                        ?? 0.00
+                    );
+
+                    $idvAmount = isset($validated['idv_amount']) 
+                        ? (float) $validated['idv_amount'] 
+                        : ($request->filled('idv_amount') ? (float) $request->input('idv_amount') : null);
+
+                    $insuranceNotes = $validated['insurance_notes'] 
+                        ?? $request->input('insurance_notes') 
+                        ?? $request->input('insurance_note') 
+                        ?? null;
+
+                    Insurance::create([
+                        'deal_id' => $deal->id,
+                        'lead_id' => $lead->id,
+                        'customer_name' => $deal->customer_name,
+                        'customer_phone' => $deal->customer_phone,
+                        'customer_email' => $deal->customer_email,
+                        'customer_address' => $deal->customer_city,
+                        'vehicle_name' => $deal->model_variant,
+                        'registration_number' => $deal->registration_number,
+                        'vin_chassis_number' => $deal->vin_chassis_number,
+                        'engine_number' => $deal->engine_number,
+                        'premium_amount' => $premiumAmount,
+                        'idv_amount' => $idvAmount,
+                        'delivery_date' => $delivDate,
+                        'start_date' => $delivDate,
+                        'expiry_date' => $expireDate,
+                        'next_insurance_date' => $expireDate,
+                        'status' => 'active',
+                        'notes' => $insuranceNotes,
+                        'created_by' => $creatorId,
+                        'sales_executive_id' => $deal->sales_executive_id,
+                        'sales_executive_name' => $deal->sales_executive_name,
+                    ]);
+                }
 
                 // Update Lead status to "Deal Won" / Converted
                 $dealWonStatus = LeadStatus::where('name', 'like', '%Deal Won%')
@@ -357,8 +475,8 @@ class DealController extends Controller
                 ]);
 
                 // If Quotation exists, mark it as accepted
-                if (!empty($validated['quotation_id'])) {
-                    Quotation::where('id', $validated['quotation_id'])->update([
+                if (!empty($quotationId)) {
+                    Quotation::where('id', $quotationId)->update([
                         'status' => 'accepted',
                     ]);
                 }
@@ -435,7 +553,7 @@ class DealController extends Controller
                     $deal->refresh();
                 }
 
-                $deal->load(['lead', 'quotation', 'brand', 'salesExecutive', 'payments']);
+                $deal->load(['lead', 'quotation', 'brand', 'salesExecutive', 'payments', 'insurances']);
 
                 return response()->json([
                     'status' => true,

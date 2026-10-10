@@ -16,6 +16,7 @@ class VehicleVariant extends Model
         'model_id',
         'name',
         'price',
+        'previous_price',
         'ex_showroom_price',
         'rto_road_tax',
         'insurance',
@@ -26,6 +27,7 @@ class VehicleVariant extends Model
 
     protected $casts = [
         'price' => 'float',
+        'previous_price' => 'float',
         'ex_showroom_price' => 'float',
         'rto_road_tax' => 'float',
         'insurance' => 'float',

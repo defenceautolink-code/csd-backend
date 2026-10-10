@@ -146,6 +146,7 @@ class VehiclePriceMasterController extends Controller
             // Update Variant Record
             $variant->update([
                 'price' => $revisedExShowroom,
+                'previous_price' => $previousExShowroom,
                 'ex_showroom_price' => $revisedExShowroom,
                 'rto_road_tax' => $rtoTax,
                 'insurance' => $insurance,
