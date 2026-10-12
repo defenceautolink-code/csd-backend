@@ -50,8 +50,14 @@ class LeadController extends Controller
                       ->orWhere('email', 'like', '%' . $search . '%')
                       ->orWhere('model_variant', 'like', '%' . $search . '%')
                       ->orWhere('city', 'like', '%' . $search . '%')
+                      ->orWhere('posting', 'like', '%' . $search . '%')
                       ->orWhere('brand_name', 'like', '%' . $search . '%');
                 });
+            }
+
+            // Filter by Posting
+            if ($request->filled('posting')) {
+                $query->where('posting', 'like', '%' . $request->posting . '%');
             }
 
             // Filter by Priority (Hot / Warm / Cold)
@@ -171,6 +177,7 @@ class LeadController extends Controller
                 'email' => 'nullable|email|max:255',
                 'city' => 'nullable|string|max:100',
                 'state' => 'nullable|string|max:100',
+                'posting' => 'nullable|string|max:255',
                 'birth_date' => 'nullable|date',
                 'anniversary_date' => 'nullable|date',
                 'vehicle_segment' => 'nullable|string',
@@ -291,6 +298,7 @@ class LeadController extends Controller
                     'phone' => $request->phone,
                     'city' => $request->filled('city') ? $request->city : null,
                     'state' => $request->filled('state') ? $request->state : null,
+                    'posting' => $request->filled('posting') ? $request->posting : null,
                     'birth_date' => $birthDate,
                     'anniversary_date' => $anniversaryDate,
                     'vehicle_segment' => $segment,
@@ -439,6 +447,7 @@ class LeadController extends Controller
                 'email' => 'nullable|email|max:255',
                 'city' => 'nullable|string|max:100',
                 'state' => 'nullable|string|max:100',
+                'posting' => 'nullable|string|max:255',
                 'birth_date' => 'nullable|date',
                 'anniversary_date' => 'nullable|date',
                 'vehicle_segment' => 'sometimes|required|string|in:2 Wheeler,4 Wheeler,2 wheeler,4 wheeler',
@@ -500,6 +509,7 @@ class LeadController extends Controller
             if ($request->has('phone')) $updateData['phone'] = $request->phone;
             if ($request->has('city')) $updateData['city'] = $request->city;
             if ($request->has('state')) $updateData['state'] = $request->state;
+            if ($request->has('posting')) $updateData['posting'] = $request->posting;
             if ($request->has('birth_date')) $updateData['birth_date'] = $request->birth_date;
             if ($request->has('anniversary_date')) $updateData['anniversary_date'] = $request->anniversary_date;
             if ($request->has('vehicle_segment')) $updateData['vehicle_segment'] = $request->vehicle_segment;
@@ -868,6 +878,10 @@ class LeadController extends Controller
                         'date_of_birth' => 'birth_date',
                         'anniversary' => 'anniversary_date',
                         'timeline' => 'purchase_timeline',
+                        'posting' => 'posting',
+                        'posting_place' => 'posting',
+                        'posting_location' => 'posting',
+                        'place_of_posting' => 'posting',
                     ];
 
                     return $map[$cleaned] ?? $cleaned;
@@ -1020,6 +1034,7 @@ class LeadController extends Controller
                         'phone' => $phone,
                         'city' => !empty($row['city']) ? $row['city'] : null,
                         'state' => !empty($row['state']) ? $row['state'] : null,
+                        'posting' => !empty($row['posting']) ? $row['posting'] : null,
                         'birth_date' => $birthDate,
                         'anniversary_date' => $anniversaryDate,
                         'vehicle_segment' => $segment,

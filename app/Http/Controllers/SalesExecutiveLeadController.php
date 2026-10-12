@@ -40,8 +40,14 @@ class SalesExecutiveLeadController extends Controller
                       ->orWhere('email', 'like', '%' . $search . '%')
                       ->orWhere('model_variant', 'like', '%' . $search . '%')
                       ->orWhere('city', 'like', '%' . $search . '%')
+                      ->orWhere('posting', 'like', '%' . $search . '%')
                       ->orWhere('brand_name', 'like', '%' . $search . '%');
                 });
+            }
+
+            // Filter by Posting
+            if ($request->filled('posting')) {
+                $query->where('posting', 'like', '%' . $request->posting . '%');
             }
 
             // Filter by Status

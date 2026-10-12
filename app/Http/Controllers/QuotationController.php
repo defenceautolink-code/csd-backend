@@ -60,6 +60,7 @@ class QuotationController extends Controller
                     'address' => $address,
                     'city' => $lead->city,
                     'state' => $lead->state,
+                    'posting' => $lead->posting,
                     'vehicle_segment' => $lead->vehicle_segment,
                     'brand_id' => $lead->brand_id,
                     'brand_name' => $lead->brand_name,

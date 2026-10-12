@@ -15,6 +15,7 @@ class Lead extends Model
         'phone',
         'city',
         'state',
+        'posting',
         'birth_date',
         'anniversary_date',
         'last_birthday_wished_year',

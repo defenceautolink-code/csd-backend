@@ -179,6 +179,8 @@ class DealController extends Controller
                     'customer_phone' => $lead->phone,
                     'customer_city' => $lead->city,
                     'customer_state' => $lead->state,
+                    'customer_posting' => $lead->posting,
+                    'posting' => $lead->posting,
                     'customer_address' => trim(implode(', ', array_filter([$lead->city, $lead->state]))),
                     'vehicle_segment' => $lead->vehicle_segment ?? '4 Wheeler',
                     'brand_id' => $lead->brand_id,
