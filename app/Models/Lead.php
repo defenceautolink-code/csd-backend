@@ -33,6 +33,9 @@ class Lead extends Model
         'status_name',
         'assigned_to',
         'assigned_user_name',
+        'discount_approval_status',
+        'requested_discount',
+        'approved_discount',
     ];
 
     /**
@@ -43,6 +46,8 @@ class Lead extends Model
         'anniversary_date' => 'date:Y-m-d',
         'last_birthday_wished_year' => 'integer',
         'last_anniversary_wished_year' => 'integer',
+        'requested_discount' => 'float',
+        'approved_discount' => 'float',
     ];
 
     /**
@@ -267,6 +272,46 @@ class Lead extends Model
     public function insurances()
     {
         return $this->hasMany(Insurance::class, 'lead_id')->latest('id');
+    }
+
+    /**
+     * Relationship: Lead has many discount approvals
+     */
+    public function discountApprovals()
+    {
+        return $this->hasMany(DiscountApproval::class, 'lead_id')->latest('id');
+    }
+
+    /**
+     * Relationship: Latest discount approval record
+     */
+    public function latestDiscountApproval()
+    {
+        return $this->hasOne(DiscountApproval::class, 'lead_id')->latestOfMany();
+    }
+
+    /**
+     * Accessor: Discount approval status with default 'none'
+     */
+    public function getDiscountApprovalStatusAttribute($value): string
+    {
+        return $value ?: 'none';
+    }
+
+    /**
+     * Accessor: Requested discount with default 0.0
+     */
+    public function getRequestedDiscountAttribute($value): float
+    {
+        return (float) ($value ?? 0.0);
+    }
+
+    /**
+     * Accessor: Approved discount with default 0.0
+     */
+    public function getApprovedDiscountAttribute($value): float
+    {
+        return (float) ($value ?? 0.0);
     }
 }
 

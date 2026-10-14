@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DiscountApproval;
 use App\Models\Lead;
 use App\Models\LeadFollowUp;
 use App\Models\LeadStatus;
@@ -220,9 +221,29 @@ class FollowUpController extends Controller
                 'status' => 'required|string|max:50',
                 'lead_status_id' => 'nullable|exists:lead_statuses,id',
                 'lead_status_name' => 'nullable|string|max:100',
+                'is_discount_requested' => 'nullable',
+                'discount_amount' => 'nullable|numeric|min:0',
+                'proposed_price' => 'nullable|numeric|min:0',
+                'reason' => 'nullable|string|max:5000',
             ]);
 
             $userId = $user ? $user->id : ($lead->assigned_to ?? User::first()?->id);
+
+            // Check if a special discount is being requested
+            $isDiscountRequested = filter_var($request->input('is_discount_requested'), FILTER_VALIDATE_BOOLEAN);
+            $discountAmount = $request->filled('discount_amount') ? (float) $request->input('discount_amount') : 0.0;
+            $proposedPrice = $request->filled('proposed_price') ? (float) $request->input('proposed_price') : null;
+            $reason = $request->input('reason') ?: $request->input('notes');
+
+            if ($isDiscountRequested && $discountAmount <= 0) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'The discount_amount field is required and must be greater than 0 when requesting a discount.',
+                    'errors' => [
+                        'discount_amount' => ['The discount amount must be greater than 0 when is_discount_requested is true.'],
+                    ],
+                ], 422);
+            }
 
             $followUp = LeadFollowUp::create([
                 'lead_id' => $lead->id,
@@ -234,30 +255,59 @@ class FollowUpController extends Controller
                 'next_follow_up_date' => $request->filled('next_follow_up_date') ? date('Y-m-d', strtotime($request->next_follow_up_date)) : null,
                 'next_follow_up_time' => $request->next_follow_up_time,
                 'status' => ucfirst(strtolower($request->status)),
+                'is_discount_requested' => $isDiscountRequested,
+                'discount_amount' => $isDiscountRequested ? $discountAmount : null,
+                'proposed_price' => $isDiscountRequested ? $proposedPrice : null,
             ]);
 
-            // If lead status updated as part of follow-up interaction
-            if ($request->filled('lead_status_id') || $request->filled('lead_status_name')) {
-                $statusName = $request->lead_status_name;
-                $statusId = $request->lead_status_id;
+            if ($isDiscountRequested) {
+                // Create pending discount approval record
+                DiscountApproval::create([
+                    'lead_id' => $lead->id,
+                    'follow_up_id' => $followUp->id,
+                    'requested_by' => $userId,
+                    'discount_amount' => $discountAmount,
+                    'proposed_price' => $proposedPrice,
+                    'reason' => $reason,
+                    'status' => 'pending',
+                ]);
 
-                if ($statusId && !$statusName) {
-                    $st = LeadStatus::find($statusId);
-                    $statusName = $st ? $st->name : null;
-                } elseif ($statusName && !$statusId) {
-                    $st = LeadStatus::where('name', $statusName)->first();
-                    $statusId = $st ? $st->id : null;
-                }
+                // Ensure "Discount Pending" status exists and update lead
+                $discountPendingStatus = LeadStatus::firstOrCreate(
+                    ['name' => 'Discount Pending'],
+                    ['status' => 'Active']
+                );
 
-                if ($statusName || $statusId) {
-                    $lead->update([
-                        'status_id' => $statusId ?: $lead->status_id,
-                        'status_name' => $statusName ?: $lead->status_name,
-                    ]);
+                $lead->update([
+                    'status_id' => $discountPendingStatus->id,
+                    'status_name' => 'Discount Pending',
+                    'discount_approval_status' => 'pending',
+                    'requested_discount' => $discountAmount,
+                ]);
+            } else {
+                // If lead status updated as part of regular follow-up interaction
+                if ($request->filled('lead_status_id') || $request->filled('lead_status_name')) {
+                    $statusName = $request->lead_status_name;
+                    $statusId = $request->lead_status_id;
+
+                    if ($statusId && !$statusName) {
+                        $st = LeadStatus::find($statusId);
+                        $statusName = $st ? $st->name : null;
+                    } elseif ($statusName && !$statusId) {
+                        $st = LeadStatus::where('name', $statusName)->first();
+                        $statusId = $st ? $st->id : null;
+                    }
+
+                    if ($statusName || $statusId) {
+                        $lead->update([
+                            'status_id' => $statusId ?: $lead->status_id,
+                            'status_name' => $statusName ?: $lead->status_name,
+                        ]);
+                    }
                 }
             }
 
-            $followUp->load(['user', 'lead']);
+            $followUp->load(['user', 'lead', 'discountApproval']);
 
             return response()->json([
                 'status' => true,

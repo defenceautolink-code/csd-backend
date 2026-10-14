@@ -11,6 +11,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\TokenBillingController;
 use App\Http\Controllers\DealController;
 use App\Http\Controllers\DealPaymentController;
+use App\Http\Controllers\DiscountApprovalController;
 use App\Http\Controllers\ExpenseCategoryController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\InsuranceController;
@@ -27,8 +28,11 @@ Route::get('/user', function (Request $request) {
     return $request->user();
 })->middleware('auth:sanctum');
 
-// Authentication API
+// Authentication & Profile APIs
 Route::post('/auth/login', [AuthController::class, 'login']);
+Route::get('/auth/profile', [AuthController::class, 'profile']);
+Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
+Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
 
 // Sales Executive Dedicated APIs (Strictly scoped to authenticated user)
 Route::middleware('auth:sanctum')->prefix('sales-executive')->group(function () {
@@ -70,6 +74,11 @@ Route::get('leads/{id}/follow-ups', [FollowUpController::class, 'getByLead']);
 Route::post('leads/{id}/follow-ups', [FollowUpController::class, 'store']);
 Route::apiResource('follow-ups', FollowUpController::class);
 
+// Follow-up Discount Approval Workflow API (Admin & Sales Manager)
+Route::get('discount-approvals/pending', [DiscountApprovalController::class, 'pending']);
+Route::post('discount-approvals/{id}/action', [DiscountApprovalController::class, 'action']);
+Route::apiResource('discount-approvals', DiscountApprovalController::class);
+
 // Get Lead details formatted for Quotation creation
 Route::get('leads/{id}/quotation', [QuotationController::class, 'getLeadForQuotation']);
 // Get all Quotations and complete Lead data for a specific Lead
@@ -84,7 +93,9 @@ Route::get('leads/send-greetings-now', [LeadController::class, 'sendGreetingsNow
 // Customer Leads Master CRUD API
 Route::apiResource('leads', LeadController::class);
 
-// Users Master CRUD API
+// Users Master CRUD & User Password API
+Route::put('users/{id}/profile', [UserController::class, 'updateProfile']);
+Route::post('users/{id}/change-password', [UserController::class, 'changePassword']);
 Route::apiResource('users', UserController::class);
 
 // Quotations API Routes

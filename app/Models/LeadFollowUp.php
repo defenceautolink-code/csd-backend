@@ -21,6 +21,18 @@ class LeadFollowUp extends Model
         'next_follow_up_date',
         'next_follow_up_time',
         'status',
+        'is_discount_requested',
+        'discount_amount',
+        'proposed_price',
+    ];
+
+    /**
+     * Cast attributes to native types
+     */
+    protected $casts = [
+        'is_discount_requested' => 'boolean',
+        'discount_amount' => 'float',
+        'proposed_price' => 'float',
     ];
 
     /**
@@ -29,6 +41,14 @@ class LeadFollowUp extends Model
     protected $appends = [
         'user_name',
     ];
+
+    /**
+     * Relationship: Associated Discount Approval record
+     */
+    public function discountApproval()
+    {
+        return $this->hasOne(DiscountApproval::class, 'follow_up_id');
+    }
 
     /**
      * Relationship: Follow-up belongs to a Lead

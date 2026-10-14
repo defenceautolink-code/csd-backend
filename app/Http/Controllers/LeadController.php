@@ -72,6 +72,11 @@ class LeadController extends Controller
                 $query->where('status_id', $request->status_id);
             }
 
+            // Filter by Discount Approval Status (none / pending / approved / rejected)
+            if ($request->filled('discount_approval_status')) {
+                $query->where('discount_approval_status', strtolower($request->discount_approval_status));
+            }
+
             // Filter by Brand
             if ($request->filled('brand_id')) {
                 $query->where('brand_id', $request->brand_id);

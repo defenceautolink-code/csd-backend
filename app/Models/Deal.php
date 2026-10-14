@@ -60,7 +60,16 @@ class Deal extends Model
 
     protected $appends = [
         'payment_percentage',
+        'balance_amount',
     ];
+
+    /**
+     * Accessor: Return balance amount alias for balance_due
+     */
+    public function getBalanceAmountAttribute(): float
+    {
+        return (float) ($this->attributes['balance_due'] ?? 0);
+    }
 
     /**
      * Accessor: Calculate payment completion percentage
@@ -141,7 +150,7 @@ class Deal extends Model
     }
 
     /**
-     * Recalculate financial totals and payment status based on cleared payments
+     * Recalculate financial totals and payment status based on payments
      */
     public function recalculateFinancials(): void
     {
@@ -150,22 +159,24 @@ class Deal extends Model
         $discountAmount = (float) ($this->discount_amount ?? 0);
         $netAmount = max(0.0, $totalAmount - $discountAmount);
 
-        // Sum only verified/cleared payment receipts
-        $totalCleared = (float) $this->clearedPayments()->sum('amount');
+        // Sum payment receipts (all non-rejected, non-bounced payments count towards total paid)
+        $totalPaid = (float) $this->payments()
+            ->whereNotIn('status', ['rejected', 'bounced'])
+            ->sum('amount');
 
-        $balanceDue = max(0.0, $netAmount - $totalCleared);
+        $balanceDue = max(0.0, $netAmount - $totalPaid);
 
         // Determine Payment Status
-        if ($totalCleared <= 0) {
+        if ($totalPaid <= 0) {
             $paymentStatus = 'unpaid';
-        } elseif ($totalCleared >= $netAmount && $netAmount > 0) {
-            $paymentStatus = $totalCleared > $netAmount ? 'overpaid' : 'paid';
+        } elseif ($totalPaid >= $netAmount && $netAmount > 0) {
+            $paymentStatus = $totalPaid > $netAmount ? 'overpaid' : 'paid';
         } else {
             $paymentStatus = 'partially_paid';
         }
 
         $this->net_amount = $netAmount;
-        $this->total_paid = $totalCleared;
+        $this->total_paid = $totalPaid;
         $this->balance_due = $balanceDue;
         $this->payment_status = $paymentStatus;
 

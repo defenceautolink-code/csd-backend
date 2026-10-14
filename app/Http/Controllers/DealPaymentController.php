@@ -36,9 +36,16 @@ class DealPaymentController extends Controller
                 $query->where('lead_id', $request->lead_id);
             }
 
-            // Filter by Status (pending, cleared, bounced, rejected, refunded)
-            if ($request->filled('status')) {
-                $query->where('status', $request->status);
+            // Filter by Payment Status (pending, cleared, bounced, rejected, refunded)
+            $statusFilter = $request->input('payment_status') ?? $request->input('paymentStatus') ?? $request->input('status');
+            if (!empty($statusFilter)) {
+                if (is_array($statusFilter)) {
+                    $query->whereIn('status', $statusFilter);
+                } elseif (str_contains($statusFilter, ',')) {
+                    $query->whereIn('status', array_map('trim', explode(',', $statusFilter)));
+                } else {
+                    $query->where('status', trim($statusFilter));
+                }
             }
 
             // Filter by Payment Type (token_advance, down_payment, bank_finance, exchange_bonus, balance_payment, refund)
@@ -51,19 +58,35 @@ class DealPaymentController extends Controller
                 $query->where('payment_mode', $request->payment_mode);
             }
 
-            // Date range filters
-            if ($request->filled('from_date')) {
-                $query->whereDate('payment_date', '>=', $request->from_date);
-            }
-            if ($request->filled('to_date')) {
-                $query->whereDate('payment_date', '<=', $request->to_date);
+            // Filter by Invoice No
+            if ($request->filled('invoice_no')) {
+                $query->where('invoice_no', 'like', "%" . trim($request->invoice_no) . "%");
+            } elseif ($request->filled('invoice_number')) {
+                $query->where('invoice_no', 'like', "%" . trim($request->invoice_number) . "%");
             }
 
-            // Search Filter (Receipt Number, Transaction reference, Bank name, or Customer name)
+            // Date range filters (start_date, end_date, from_date, to_date)
+            $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('from_date') ?? $request->input('date_from');
+            $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('to_date') ?? $request->input('date_to');
+            $singleDate = $request->input('date');
+
+            if (!empty($singleDate)) {
+                $query->whereDate('payment_date', $singleDate);
+            } else {
+                if (!empty($startDate)) {
+                    $query->whereDate('payment_date', '>=', $startDate);
+                }
+                if (!empty($endDate)) {
+                    $query->whereDate('payment_date', '<=', $endDate);
+                }
+            }
+
+            // Search Filter (Receipt Number, Invoice No, Transaction reference, Bank name, or Customer name)
             if ($request->filled('search')) {
                 $search = trim($request->search);
                 $query->where(function ($q) use ($search) {
                     $q->where('receipt_number', 'like', "%{$search}%")
+                      ->orWhere('invoice_no', 'like', "%{$search}%")
                       ->orWhere('transaction_reference', 'like', "%{$search}%")
                       ->orWhere('bank_name', 'like', "%{$search}%")
                       ->orWhereHas('deal', function ($dq) use ($search) {
@@ -74,13 +97,16 @@ class DealPaymentController extends Controller
                 });
             }
 
+            // Sort payments by payment_date in descending order (latest first) to display latest payment invoice at the top
+            $query->orderBy('payment_date', 'desc')->orderBy('id', 'desc');
+
             // Pagination or Full List
             $isAll = $request->boolean('all') || $request->get('per_page') === 'all' || (int) $request->get('per_page') === -1;
 
             if (!$isAll) {
                 $perPage = (int) ($request->get('per_page') ?? $request->get('limit') ?? $request->get('pageSize') ?? 15);
                 $perPage = $perPage > 0 ? $perPage : 15;
-                $paginated = $query->latest('id')->paginate($perPage);
+                $paginated = $query->paginate($perPage);
 
                 return response()->json([
                     'status' => true,
@@ -97,7 +123,7 @@ class DealPaymentController extends Controller
                 ]);
             }
 
-            $payments = $query->latest('id')->get();
+            $payments = $query->get();
 
             return response()->json([
                 'status' => true,
@@ -229,6 +255,12 @@ class DealPaymentController extends Controller
                     $request->merge(['bank_name' => $bank]);
                 }
             }
+            if (!$request->has('invoice_no')) {
+                $inv = $request->input('invoice_number') ?? $request->input('invoice') ?? $request->input('bill_no') ?? $request->input('bill_number');
+                if ($inv !== null) {
+                    $request->merge(['invoice_no' => $inv]);
+                }
+            }
 
             $validated = $request->validate([
                 'deal_id' => 'required|exists:deals,id',
@@ -236,6 +268,7 @@ class DealPaymentController extends Controller
                 'payment_type' => 'required|string|in:token_advance,down_payment,bank_finance,exchange_bonus,part_payment,balance_payment,accessory_payment,refund',
                 'payment_mode' => 'required|string|in:upi,neft_rtgs,cheque,cash,card_pos,bank_disbursal',
                 'payment_date' => 'required|date',
+                'invoice_no' => 'required|string|max:100|unique:deal_payments,invoice_no',
                 'transaction_reference' => 'nullable|string|max:150',
                 'reference' => 'nullable|string|max:150',
                 'utr' => 'nullable|string|max:150',
@@ -246,10 +279,13 @@ class DealPaymentController extends Controller
                 'payment_proof' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120', // 5MB max
                 'received_by' => 'nullable|string|max:255',
                 'notes' => 'nullable|string',
-                'auto_clear' => 'nullable|boolean', // If accountant or cashier directly creates cleared payment
+                'auto_clear' => 'nullable|boolean',
             ]);
 
             $deal = Deal::findOrFail($validated['deal_id']);
+
+            // Frontend provides the generated invoice_no
+            $invoiceNo = trim($validated['invoice_no']);
 
             // Handle payment proof upload if provided
             $proofPath = null;
@@ -271,6 +307,7 @@ class DealPaymentController extends Controller
                 'amount' => (float) $validated['amount'],
                 'payment_date' => $validated['payment_date'],
                 'payment_mode' => $validated['payment_mode'],
+                'invoice_no' => $invoiceNo,
                 'transaction_reference' => $validated['transaction_reference'] ?? null,
                 'bank_name' => $validated['bank_name'] ?? null,
                 'cheque_date' => $validated['cheque_date'] ?? null,
@@ -287,6 +324,8 @@ class DealPaymentController extends Controller
             ]);
 
             $deal->refresh();
+            $deal->recalculateFinancials();
+            $deal->refresh();
             $deal->load(['lead', 'quotation', 'brand', 'salesExecutive', 'payments']);
             $payment->load(['deal', 'lead', 'recordedBy', 'verifiedBy']);
 
@@ -295,12 +334,16 @@ class DealPaymentController extends Controller
                 'message' => "Payment receipt #{$payment->receipt_number} recorded successfully",
                 'data' => [
                     'payment' => $payment,
+                    'invoice_no' => $payment->invoice_no,
                     'deal_financial_summary' => [
                         'deal_id' => $deal->id,
                         'deal_number' => $deal->deal_number,
-                        'net_amount' => $deal->net_amount,
-                        'total_paid' => $deal->total_paid,
-                        'balance_due' => $deal->balance_due,
+                        'total_amount' => (float) $deal->total_amount,
+                        'discount_amount' => (float) $deal->discount_amount,
+                        'net_amount' => (float) $deal->net_amount,
+                        'total_paid' => (float) $deal->total_paid,
+                        'balance_due' => (float) $deal->balance_due,
+                        'balance_amount' => (float) ($deal->balance_amount ?? $deal->balance_due),
                         'payment_status' => $deal->payment_status,
                     ],
                 ],
@@ -383,12 +426,19 @@ class DealPaymentController extends Controller
                     $request->merge(['bank_name' => $bank]);
                 }
             }
+            if (!$request->has('invoice_no')) {
+                $inv = $request->input('invoice_number') ?? $request->input('invoice') ?? $request->input('bill_no') ?? $request->input('bill_number');
+                if ($inv !== null) {
+                    $request->merge(['invoice_no' => $inv]);
+                }
+            }
 
             $validated = $request->validate([
                 'amount' => 'sometimes|numeric|min:1',
                 'payment_type' => 'sometimes|string|in:token_advance,down_payment,bank_finance,exchange_bonus,part_payment,balance_payment,accessory_payment,refund',
                 'payment_mode' => 'sometimes|string|in:upi,neft_rtgs,cheque,cash,card_pos,bank_disbursal',
                 'payment_date' => 'sometimes|date',
+                'invoice_no' => 'sometimes|nullable|string|max:100|unique:deal_payments,invoice_no,' . $payment->id,
                 'transaction_reference' => 'nullable|string|max:150',
                 'reference' => 'nullable|string|max:150',
                 'utr' => 'nullable|string|max:150',
@@ -399,6 +449,11 @@ class DealPaymentController extends Controller
                 'received_by' => 'nullable|string|max:255',
                 'notes' => 'nullable|string',
             ]);
+
+            if (array_key_exists('invoice_no', $validated)) {
+                $validated['invoice_no'] = !empty(trim($validated['invoice_no'] ?? '')) ? trim($validated['invoice_no']) : null;
+            }
+            unset($validated['invoice_number'], $validated['reference'], $validated['utr'], $validated['transaction_no'], $validated['bank']);
 
             $payment->update($validated);
 
