@@ -32,6 +32,7 @@ class DealPayment extends Model
         'verified_by',
         'verified_by_name',
         'verified_at',
+        'invoice_no'
     ];
 
     protected $casts = [
@@ -45,6 +46,7 @@ class DealPayment extends Model
         'reference',
         'utr',
         'bank',
+        'invoice_no',
     ];
 
     public function getReferenceAttribute()
@@ -60,6 +62,16 @@ class DealPayment extends Model
     public function getBankAttribute()
     {
         return $this->attributes['bank_name'] ?? null;
+    }
+
+    public function getInvoiceNoAttribute()
+    {
+        return $this->attributes['invoice_no'] ?? null;
+    }
+
+    public function getInvoiceNumberAttribute()
+    {
+        return $this->attributes['invoice_no'] ?? null;
     }
 
     /**
@@ -126,6 +138,28 @@ class DealPayment extends Model
 
         if ($latest) {
             $lastNumberStr = str_replace($prefix, '', $latest->receipt_number);
+            $nextSeq = (int) $lastNumberStr + 1;
+        } else {
+            $nextSeq = 1;
+        }
+
+        return $prefix . str_pad((string) $nextSeq, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Generate unique sequential payment invoice number (format: INV-YYYY-XXXX)
+     */
+    public static function generateInvoiceNumber(): string
+    {
+        $year = Carbon::now()->format('Y');
+        $prefix = "INV-{$year}-";
+
+        $latest = self::where('invoice_no', 'like', "{$prefix}%")
+            ->orderBy('id', 'desc')
+            ->first();
+
+        if ($latest) {
+            $lastNumberStr = str_replace($prefix, '', $latest->invoice_no);
             $nextSeq = (int) $lastNumberStr + 1;
         } else {
             $nextSeq = 1;

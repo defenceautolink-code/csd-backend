@@ -58,6 +58,11 @@ class SalesExecutiveLeadController extends Controller
                 $query->where('status_id', $request->status_id);
             }
 
+            // Filter by Discount Approval Status
+            if ($request->filled('discount_approval_status')) {
+                $query->where('discount_approval_status', strtolower($request->discount_approval_status));
+            }
+
             // Filter by Priority
             if ($request->filled('priority')) {
                 $query->where('priority', ucfirst(strtolower($request->priority)));

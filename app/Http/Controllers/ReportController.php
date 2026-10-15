@@ -101,7 +101,7 @@ class ReportController extends Controller
             $sourceAttribution = $this->calculateSourceAttribution($leadQuery, $startDate, $endDate);
 
             // SECTION 4: SALES EXECUTIVE PERFORMANCE LEADERBOARD
-            $executiveLeaderboard = $this->calculateExecutiveLeaderboard($startDate, $endDate);
+            $executiveLeaderboard = $this->calculateExecutiveLeaderboard($startDate, $endDate, $request->input('role'));
 
             return response()->json([
                 'status' => true,
@@ -254,7 +254,7 @@ class ReportController extends Controller
             $startDate = $dateParams['start_date'];
             $endDate = $dateParams['end_date'];
 
-            $leaderboard = $this->calculateExecutiveLeaderboard($startDate, $endDate);
+            $leaderboard = $this->calculateExecutiveLeaderboard($startDate, $endDate, $request->input('role'));
 
             return response()->json([
                 'status' => true,
@@ -398,19 +398,12 @@ class ReportController extends Controller
     /**
      * Calculate Sales Conversion Funnel Stages
      */
-    private function calculateConversionFunnel($leadQuery, $followUpQuery)
+        private function calculateConversionFunnel($leadQuery, $followUpQuery)
     {
         $totalInquiries = (clone $leadQuery)->count();
         $contactedLeads = (clone $leadQuery)->where(function ($q) {
             $q->whereNotIn('status_name', ['New', 'Cancelled'])
               ->orWhereHas('followUps');
-        })->count();
-
-        $testDrivesCompleted = (clone $leadQuery)->where(function ($q) {
-            $q->where('status_name', 'like', '%Test Drive%')
-              ->orWhereHas('followUps', function ($fq) {
-                  $fq->whereIn('type', ['Test Drive', 'Visit']);
-              });
         })->count();
 
         $quotationsSent = (clone $leadQuery)->whereHas('quotations')->count();
@@ -440,21 +433,14 @@ class ReportController extends Controller
                 ],
                 [
                     'stage_number' => 3,
-                    'label' => '3. Test Drives Completed',
-                    'count' => 385,
-                    'unit_label' => 'Drivers',
-                    'percentage' => 30.0,
-                ],
-                [
-                    'stage_number' => 4,
-                    'label' => '4. Official Quotations Sent',
+                    'label' => '3. Official Quotations Sent',
                     'count' => 246,
                     'unit_label' => 'Quotes',
                     'percentage' => 19.2,
                 ],
                 [
-                    'stage_number' => 5,
-                    'label' => '5. Final Closed Deliveries (Won)',
+                    'stage_number' => 4,
+                    'label' => '4. Final Closed Deliveries (Won)',
                     'count' => 64,
                     'unit_label' => 'Bookings',
                     'percentage' => 5.0,
@@ -481,21 +467,14 @@ class ReportController extends Controller
             ],
             [
                 'stage_number' => 3,
-                'label' => '3. Test Drives Completed',
-                'count' => $testDrivesCompleted,
-                'unit_label' => 'Drivers',
-                'percentage' => round(($testDrivesCompleted / $base) * 100, 1),
-            ],
-            [
-                'stage_number' => 4,
-                'label' => '4. Official Quotations Sent',
+                'label' => '3. Official Quotations Sent',
                 'count' => $quotationsSent,
                 'unit_label' => 'Quotes',
                 'percentage' => round(($quotationsSent / $base) * 100, 1),
             ],
             [
-                'stage_number' => 5,
-                'label' => '5. Final Closed Deliveries (Won)',
+                'stage_number' => 4,
+                'label' => '4. Final Closed Deliveries (Won)',
                 'count' => $closedDeliveries,
                 'unit_label' => 'Bookings',
                 'percentage' => round(($closedDeliveries / $base) * 100, 1),
@@ -612,33 +591,59 @@ class ReportController extends Controller
     /**
      * Calculate Sales Executive Performance Leaderboard
      */
-    private function calculateExecutiveLeaderboard($startDate, $endDate)
+        private function calculateExecutiveLeaderboard($startDate, $endDate, $roleFilter = null)
     {
-        $salesReps = User::whereIn('role', ['Sales Executive', 'Sales Manager', 'Super Admin'])
-            ->where('status', 'Active')
-            ->get();
+        $query = User::where('status', 'Active');
+
+        if ($roleFilter) {
+            $normalizedRole = strtolower(str_replace(['_', '-'], ' ', trim($roleFilter)));
+            if ($normalizedRole === 'sales executive' || $normalizedRole === 'sales') {
+                $query->where('role', 'Sales Executive');
+            } elseif ($normalizedRole === 'sales manager' || $normalizedRole === 'manager') {
+                $query->where('role', 'Sales Manager');
+            } elseif ($normalizedRole === 'super admin' || $normalizedRole === 'admin') {
+                $query->where('role', 'Super Admin');
+            } elseif ($normalizedRole === 'all') {
+                $query->whereIn('role', ['Sales Executive', 'Sales Manager', 'Super Admin']);
+            } else {
+                $query->where('role', 'like', '%' . $roleFilter . '%');
+            }
+        } else {
+            // Default: Sales team only (excludes Super Admin unless specifically requested)
+            $query->whereIn('role', ['Sales Executive', 'Sales Manager']);
+        }
+
+        $salesReps = $query->get();
 
         $leaderboard = [];
 
         foreach ($salesReps as $rep) {
             $lq = Lead::where('assigned_to', $rep->id);
             $dq = Deal::where('sales_executive_id', $rep->id)->where('deal_status', '!=', 'cancelled');
-            $fq = LeadFollowUp::where('user_id', $rep->id)->whereIn('type', ['Test Drive', 'Visit']);
+            $fqPending = LeadFollowUp::where('user_id', $rep->id)
+                ->where(function ($q) {
+                    $q->where('status', 'Pending')
+                      ->orWhere('status', 'like', '%pending%')
+                      ->orWhere('status', 'like', '%call back%')
+                      ->orWhere(function ($sq) {
+                          $sq->whereNull('status')->orWhere('status', '!=', 'Completed');
+                      });
+                });
 
             if ($startDate) {
                 $lq->whereDate('created_at', '>=', $startDate);
                 $dq->whereDate('booking_date', '>=', $startDate);
-                $fq->whereDate('follow_up_date', '>=', $startDate);
+                $fqPending->whereDate('follow_up_date', '>=', $startDate);
             }
             if ($endDate) {
                 $lq->whereDate('created_at', '<=', $endDate);
                 $dq->whereDate('booking_date', '<=', $endDate);
-                $fq->whereDate('follow_up_date', '<=', $endDate);
+                $fqPending->whereDate('follow_up_date', '<=', $endDate);
             }
 
             $leadsAssigned = $lq->count();
             $dealsClosed = $dq->count();
-            $testDrives = $fq->count();
+            $pendingFollowups = $fqPending->count();
             $salesVolume = (float) $dq->sum('net_amount');
 
             // Default target calculation (e.g. 25 deals target)
@@ -659,7 +664,7 @@ class ReportController extends Controller
                 'profile_photo' => $rep->profile_photo ? url($rep->profile_photo) : null,
                 'branch' => 'Main Showroom (Delhi)',
                 'leads_assigned' => $leadsAssigned,
-                'test_drives' => $testDrives,
+                'pending_followups' => $pendingFollowups,
                 'deals_closed' => $dealsClosed,
                 'deals_closed_label' => "{$dealsClosed} Units",
                 'target_achieved_percentage' => $targetAchieved,
@@ -678,28 +683,6 @@ class ReportController extends Controller
         $rank = 1;
         foreach ($leaderboard as &$item) {
             $item['rank'] = $rank++;
-        }
-
-        // Fallback default leaderboard entry if list is empty or zero
-        if (empty($leaderboard) || ($leaderboard[0]['deals_closed'] === 0 && $leaderboard[0]['total_sales_volume'] === 0.0)) {
-            return [
-                [
-                    'rank' => 1,
-                    'user_id' => 1,
-                    'rep_name' => 'Vikram Singh',
-                    'designation' => 'Senior Sales Consultant',
-                    'profile_photo' => null,
-                    'branch' => 'Main Showroom (Delhi)',
-                    'leads_assigned' => 310,
-                    'test_drives' => 112,
-                    'deals_closed' => 24,
-                    'deals_closed_label' => '24 Units',
-                    'target_achieved_percentage' => 94.0,
-                    'total_sales_volume' => 71500000.00,
-                    'formatted_sales_volume' => '₹7.15 Cr',
-                    'performance_status' => 'Outstanding',
-                ],
-            ];
         }
 
         return $leaderboard;

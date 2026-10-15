@@ -29,8 +29,9 @@ class DealController extends Controller
                 'brand:id,name',
                 'salesExecutive:id,name,email,role',
                 'payments' => function ($q) {
-                    $q->select('id', 'deal_id', 'receipt_number', 'payment_type', 'amount', 'payment_date', 'payment_mode', 'transaction_reference', 'bank_name', 'cheque_date', 'cheque_status', 'received_by', 'status', 'notes', 'recorded_by', 'recorded_by_name', 'verified_by', 'verified_by_name', 'verified_at')
-                      ->orderBy('payment_date', 'asc');
+                    $q->select('id', 'deal_id', 'receipt_number', 'payment_type', 'amount', 'payment_date', 'payment_mode', 'invoice_no', 'transaction_reference', 'bank_name', 'cheque_date', 'cheque_status', 'received_by', 'status', 'notes', 'recorded_by', 'recorded_by_name', 'verified_by', 'verified_by_name', 'verified_at')
+                      ->orderBy('payment_date', 'desc')
+                      ->orderBy('id', 'desc');
                 },
             ]);
 
@@ -66,8 +67,15 @@ class DealController extends Controller
             }
 
             // Filter by Payment Status (unpaid, partially_paid, paid, refunded)
-            if ($request->filled('payment_status')) {
-                $query->where('payment_status', $request->payment_status);
+            $paymentStatus = $request->input('payment_status') ?? $request->input('paymentStatus');
+            if (!empty($paymentStatus)) {
+                if (is_array($paymentStatus)) {
+                    $query->whereIn('payment_status', $paymentStatus);
+                } elseif (str_contains($paymentStatus, ',')) {
+                    $query->whereIn('payment_status', array_map('trim', explode(',', $paymentStatus)));
+                } else {
+                    $query->where('payment_status', trim($paymentStatus));
+                }
             }
 
             // Filter by Brand
@@ -91,13 +99,29 @@ class DealController extends Controller
             }
 
             if (!empty($singleDate)) {
-                $query->whereDate($dateField, $singleDate);
+                $query->where(function ($q) use ($dateField, $singleDate) {
+                    $q->whereDate($dateField, $singleDate);
+                    if ($dateField === 'booking_date') {
+                        $q->orWhere(function ($sq) use ($singleDate) {
+                            $sq->whereNull('booking_date')->whereDate('created_at', $singleDate);
+                        });
+                    }
+                });
             } else {
-                if (!empty($startDate)) {
-                    $query->whereDate($dateField, '>=', $startDate);
-                }
-                if (!empty($endDate)) {
-                    $query->whereDate($dateField, '<=', $endDate);
+                if (!empty($startDate) || !empty($endDate)) {
+                    $query->where(function ($q) use ($dateField, $startDate, $endDate) {
+                        $q->where(function ($sq) use ($dateField, $startDate, $endDate) {
+                            if (!empty($startDate)) $sq->whereDate($dateField, '>=', $startDate);
+                            if (!empty($endDate)) $sq->whereDate($dateField, '<=', $endDate);
+                        });
+                        if ($dateField === 'booking_date') {
+                            $q->orWhere(function ($sq) use ($startDate, $endDate) {
+                                $sq->whereNull('booking_date');
+                                if (!empty($startDate)) $sq->whereDate('created_at', '>=', $startDate);
+                                if (!empty($endDate)) $sq->whereDate('created_at', '<=', $endDate);
+                            });
+                        }
+                    });
                 }
             }
 
@@ -282,6 +306,8 @@ class DealController extends Controller
                 'initial_payment.received_by' => 'nullable|string|max:255',
                 'initial_payment.notes' => 'nullable|string',
                 'initial_payment.auto_clear' => 'nullable|boolean',
+                'initial_payment.invoice_no' => 'nullable|string|max:100|unique:deal_payments,invoice_no',
+                'invoice_no' => 'nullable|string|max:100|unique:deal_payments,invoice_no',
             ]);
 
             return DB::transaction(function () use ($validated, $user, $request) {
@@ -532,6 +558,13 @@ class DealController extends Controller
                         ?? $request->input('received_by') 
                         ?? null;
 
+                    $invoiceNo = $initPay['invoice_no'] 
+                        ?? $request->input('initial_payment.invoice_no') 
+                        ?? $validated['invoice_no'] 
+                        ?? $request->input('invoice_no') 
+                        ?? null;
+                    $invoiceNo = !empty($invoiceNo) ? trim($invoiceNo) : null;
+
                     $payment = DealPayment::create([
                         'receipt_number' => DealPayment::generateReceiptNumber(),
                         'deal_id' => $deal->id,
@@ -540,6 +573,7 @@ class DealController extends Controller
                         'amount' => $initAmount,
                         'payment_date' => $initPay['payment_date'] ?? $request->input('initial_payment.payment_date') ?? now()->format('Y-m-d'),
                         'payment_mode' => $initPay['payment_mode'] ?? $request->input('initial_payment.payment_mode') ?? 'upi',
+                        'invoice_no' => $invoiceNo,
                         'transaction_reference' => $transactionRef,
                         'bank_name' => $bankName,
                         'received_by' => $receivedBy,
