@@ -42,24 +42,19 @@ Route::middleware('auth:sanctum')->prefix('sales-executive')->group(function () 
     Route::post('/leads/{lead}/follow-ups', [FollowUpController::class, 'store']);
 });
 
-// Lead Sources Master CRUD & Stats API
-Route::get('lead-sources/stats', [LeadSourceController::class, 'stats']);
+// Lead Sources Master CRUD API
 Route::apiResource('lead-sources', LeadSourceController::class);
 
-// Lead Statuses Master CRUD & Stats API
-Route::get('lead-statuses/stats', [LeadStatusController::class, 'stats']);
+// Lead Statuses Master CRUD API
 Route::apiResource('lead-statuses', LeadStatusController::class);
 
-// Brand Master CRUD & Stats API
-Route::get('brands/stats', [BrandController::class, 'stats']);
+// Brand Master CRUD API
 Route::apiResource('brands', BrandController::class);
 
-// Vehicle Model Master CRUD & Stats API
-Route::get('models/stats', [VehicleModelController::class, 'stats']);
+// Vehicle Model Master CRUD API
 Route::apiResource('models', VehicleModelController::class);
 
-// Vehicle Variant Master CRUD, Stats & Bulk Price Update API
-Route::get('variants/stats', [VehicleVariantController::class, 'stats']);
+// Vehicle Variant Master CRUD & Bulk Price Update API
 Route::post('variants/bulk-update-prices', [VehicleVariantController::class, 'bulkUpdatePrices']);
 Route::apiResource('variants', VehicleVariantController::class);
 
@@ -75,7 +70,6 @@ Route::post('leads/import', [LeadController::class, 'bulkImport']);
 Route::get('leads/{id}/assignments', [LeadAssignmentHistoryController::class, 'getByLead']);
 
 // Unified Lead Follow-Ups API (Role Managed)
-Route::get('follow-ups/stats', [FollowUpController::class, 'stats']);
 Route::get('leads/{id}/follow-ups', [FollowUpController::class, 'getByLead']);
 Route::post('leads/{id}/follow-ups', [FollowUpController::class, 'store']);
 Route::apiResource('follow-ups', FollowUpController::class);
@@ -96,12 +90,10 @@ Route::apiResource('lead-assignments', LeadAssignmentHistoryController::class);
 // Trigger Birthday & Anniversary Greetings Dispatch (GET method only)
 Route::get('leads/send-greetings-now', [LeadController::class, 'sendGreetingsNow']);
 
-// Customer Leads Master CRUD & Stats API
-Route::get('leads/stats', [LeadController::class, 'stats']);
+// Customer Leads Master CRUD API
 Route::apiResource('leads', LeadController::class);
 
-// Users Master CRUD, Stats & User Password API
-Route::get('users/stats', [UserController::class, 'stats']);
+// Users Master CRUD & User Password API
 Route::put('users/{id}/profile', [UserController::class, 'updateProfile']);
 Route::post('users/{id}/change-password', [UserController::class, 'changePassword']);
 Route::apiResource('users', UserController::class);
@@ -119,7 +111,6 @@ Route::get('deals/{dealId}/payments', [DealPaymentController::class, 'getByDeal'
 Route::apiResource('deals', DealController::class);
 
 // Deal Payments & Payment Receipts API Routes
-Route::get('invoices/stats', [DealPaymentController::class, 'invoiceStats']);
 Route::get('payments/stats', [DealPaymentController::class, 'stats']);
 Route::get('payments/pending-clearance', [DealPaymentController::class, 'getPendingClearances']);
 Route::post('payments/{id}/verify', [DealPaymentController::class, 'verify']);
@@ -132,12 +123,18 @@ Route::apiResource('expense-categories', ExpenseCategoryController::class);
 Route::get('expenses/stats', [ExpenseController::class, 'stats']);
 Route::apiResource('expenses', ExpenseController::class);
 
-// Vehicle Insurance & Renewal Reminders API Routes (Insert, Table Listing & Renewal)
-Route::get('insurances/stats', [InsuranceController::class, 'stats']);
+// Vehicle Insurance & Renewal Reminders API Routes (Insert, Table Listing, Update & Renewal)
 Route::get('insurances', [InsuranceController::class, 'index']);
 Route::post('insurances/store', [InsuranceController::class, 'store']);
+Route::put('insurances/{id}', [InsuranceController::class, 'update']);
+Route::patch('insurances/{id}', [InsuranceController::class, 'update']);
 Route::post('insurances/{id}/renew', [InsuranceController::class, 'renew']);
-Route::put('insurances/{id}', [InsuranceController::class, 'renew']);
+
+// Separate Dedicated API Routes for All Insurance Records Page
+Route::get('insurance-records', [InsuranceController::class, 'getInsuranceRecords']);
+Route::put('insurance-records/{id}', [InsuranceController::class, 'update']);
+Route::patch('insurance-records/{id}', [InsuranceController::class, 'update']);
+Route::post('insurance-records/{id}/renew', [InsuranceController::class, 'renew']);
 
 
 // Reports & Dealership Analytics API Routes

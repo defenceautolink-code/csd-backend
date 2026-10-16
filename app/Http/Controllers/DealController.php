@@ -282,7 +282,16 @@ class DealController extends Controller
                 'model_variant' => 'nullable|string|max:255',
 
                 // Optional Insurance flag & details ('Yes' to create insurance record)
+                'has_insurance' => 'nullable',
                 'insurance' => 'nullable',
+                'insurance_company' => 'nullable|string|max:150',
+                'policy_number' => 'nullable|string|max:100',
+                'insurance_type' => 'nullable|string|max:50',
+                'policy_start_date' => 'nullable|date',
+                'policy_expiry_date' => 'nullable|date',
+                'reminder_days_before' => 'nullable|integer|min:1',
+                'reminder_date' => 'nullable|date',
+                'vehicle_number' => 'nullable|string|max:100',
                 'insurance_premium' => 'nullable|numeric|min:0',
                 'premium_amount' => 'nullable|numeric|min:0',
                 'insurance_amount' => 'nullable|numeric|min:0',
@@ -424,11 +433,48 @@ class DealController extends Controller
                 }
 
                 if ($shouldCreateInsurance) {
-                    $delivDate = $deal->actual_delivery_date 
+                    $insDetails = is_array($insuranceInput) ? $insuranceInput : [];
+
+                    $delivDate = $validated['policy_start_date'] 
+                        ?? $request->input('policy_start_date') 
+                        ?? ($insDetails['policy_start_date'] ?? null)
+                        ?? $deal->actual_delivery_date 
                         ?? $deal->expected_delivery_date 
                         ?? $deal->booking_date 
                         ?? now()->format('Y-m-d');
-                    $expireDate = \Illuminate\Support\Carbon::parse($delivDate)->addDays(365)->format('Y-m-d');
+
+                    $expiryDate = $validated['policy_expiry_date'] 
+                        ?? $request->input('policy_expiry_date') 
+                        ?? ($insDetails['policy_expiry_date'] ?? null)
+                        ?? \Illuminate\Support\Carbon::parse($delivDate)->addDays(365)->format('Y-m-d');
+
+                    $reminderDays = (int) (
+                        $validated['reminder_days_before'] 
+                        ?? $request->input('reminder_days_before') 
+                        ?? ($insDetails['reminder_days_before'] ?? 15)
+                    );
+
+                    $reminderDate = $validated['reminder_date'] 
+                        ?? $request->input('reminder_date') 
+                        ?? ($insDetails['reminder_date'] ?? null)
+                        ?? \Illuminate\Support\Carbon::parse($expiryDate)->subDays($reminderDays)->format('Y-m-d');
+
+                    $insuranceCompany = $validated['insurance_company'] 
+                        ?? $request->input('insurance_company') 
+                        ?? ($insDetails['insurance_company'] ?? null);
+
+                    $policyNumber = $validated['policy_number'] 
+                        ?? $request->input('policy_number') 
+                        ?? ($insDetails['policy_number'] ?? null);
+
+                    $insuranceType = $validated['insurance_type'] 
+                        ?? $request->input('insurance_type') 
+                        ?? ($insDetails['insurance_type'] ?? 'Comprehensive');
+
+                    $vehicleNumber = $validated['vehicle_number'] 
+                        ?? $request->input('vehicle_number') 
+                        ?? ($insDetails['vehicle_number'] ?? null)
+                        ?? $deal->registration_number;
 
                     $premiumAmount = (float) (
                         $validated['premium_amount'] 
@@ -437,7 +483,7 @@ class DealController extends Controller
                         ?? $request->input('premium_amount') 
                         ?? $request->input('insurance_premium') 
                         ?? $request->input('insurance_amount') 
-                        ?? 0.00
+                        ?? ($insDetails['premium_amount'] ?? 0.00)
                     );
 
                     $idvAmount = isset($validated['idv_amount']) 
@@ -447,25 +493,36 @@ class DealController extends Controller
                     $insuranceNotes = $validated['insurance_notes'] 
                         ?? $request->input('insurance_notes') 
                         ?? $request->input('insurance_note') 
-                        ?? null;
+                        ?? ($insDetails['notes'] ?? null);
 
                     Insurance::create([
                         'deal_id' => $deal->id,
                         'lead_id' => $lead->id,
+                        'vehicle_id' => $deal->vehicle_variant_id ?? $lead->vehicle_variant_id ?? null,
+                        'customer_id' => $lead->id,
                         'customer_name' => $deal->customer_name,
                         'customer_phone' => $deal->customer_phone,
                         'customer_email' => $deal->customer_email,
                         'customer_address' => $deal->customer_city,
                         'vehicle_name' => $deal->model_variant,
-                        'registration_number' => $deal->registration_number,
+                        'vehicle_number' => $vehicleNumber,
+                        'registration_number' => $vehicleNumber,
                         'vin_chassis_number' => $deal->vin_chassis_number,
                         'engine_number' => $deal->engine_number,
-                        'premium_amount' => $premiumAmount,
-                        'idv_amount' => $idvAmount,
+                        'insurance_company' => $insuranceCompany,
+                        'policy_number' => $policyNumber,
+                        'insurance_type' => $insuranceType,
+                        'policy_start_date' => $delivDate,
+                        'policy_expiry_date' => $expiryDate,
                         'delivery_date' => $delivDate,
                         'start_date' => $delivDate,
-                        'expiry_date' => $expireDate,
-                        'next_insurance_date' => $expireDate,
+                        'expiry_date' => $expiryDate,
+                        'next_insurance_date' => $expiryDate,
+                        'reminder_days_before' => $reminderDays,
+                        'reminder_date' => $reminderDate,
+                        'renewal_status' => 'Pending',
+                        'premium_amount' => $premiumAmount,
+                        'idv_amount' => $idvAmount,
                         'status' => 'active',
                         'notes' => $insuranceNotes,
                         'created_by' => $creatorId,

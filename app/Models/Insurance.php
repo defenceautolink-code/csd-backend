@@ -16,15 +16,27 @@ class Insurance extends Model
     protected $fillable = [
         'deal_id',
         'lead_id',
+        'vehicle_id',
+        'customer_id',
         'customer_name',
         'customer_phone',
         'customer_email',
         'customer_address',
         'vehicle_name',
+        'vehicle_number',
         'registration_number',
         'vin_chassis_number',
         'engine_number',
+        'insurance_company',
+        'policy_number',
+        'insurance_type',
+        'policy_start_date',
+        'policy_expiry_date',
         'premium_amount',
+        'reminder_days_before',
+        'reminder_date',
+        'last_reminder_sent_at',
+        'renewal_status',
         'idv_amount',
         'delivery_date',
         'start_date',
@@ -42,9 +54,14 @@ class Insurance extends Model
         'delivery_date' => 'date:Y-m-d',
         'start_date' => 'date:Y-m-d',
         'expiry_date' => 'date:Y-m-d',
+        'policy_start_date' => 'date:Y-m-d',
+        'policy_expiry_date' => 'date:Y-m-d',
+        'reminder_date' => 'date:Y-m-d',
         'next_insurance_date' => 'date:Y-m-d',
+        'last_reminder_sent_at' => 'datetime',
         'premium_amount' => 'float',
         'idv_amount' => 'float',
+        'reminder_days_before' => 'integer',
         'reminder_sent' => 'boolean',
     ];
 
@@ -152,5 +169,13 @@ class Insurance extends Model
     public function salesExecutive()
     {
         return $this->belongsTo(User::class, 'sales_executive_id');
+    }
+
+    /**
+     * Relationship: Renewal history records
+     */
+    public function renewalHistories()
+    {
+        return $this->hasMany(InsuranceRenewalHistory::class, 'insurance_id')->latest('id');
     }
 }
