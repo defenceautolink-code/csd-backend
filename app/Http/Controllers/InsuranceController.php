@@ -44,14 +44,12 @@ class InsuranceController extends Controller
                 $todayStr = Carbon::today()->format('Y-m-d');
 
                 $status = $ins->status;
-                if ($status !== 'renewed') {
-                    if ($todayStr > $expireDate) {
-                        $status = 'expired';
-                    } elseif ($todayStr >= $reminderDate) {
-                        $status = 'expiring_soon';
-                    } else {
-                        $status = 'active';
-                    }
+                if ($todayStr > $expireDate) {
+                    $status = 'expired';
+                } elseif ($todayStr >= $reminderDate && $todayStr <= $expireDate) {
+                    $status = 'expiring_soon';
+                } else {
+                    $status = $ins->status === 'renewed' ? 'renewed' : 'active';
                 }
 
                 $records->push([
@@ -417,6 +415,68 @@ class InsuranceController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred while renewing insurance policy.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get Insurance KPI statistics across all database records
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $insurances = Insurance::with(['deal'])->get();
+            $todayStr = Carbon::today()->format('Y-m-d');
+
+            $total = $insurances->count();
+            $activeCount = 0;
+            $expiringSoonCount = 0;
+            $expiredCount = 0;
+            $renewedCount = 0;
+
+            foreach ($insurances as $ins) {
+                $deliveryDate = $ins->delivery_date 
+                    ?? $ins->start_date 
+                    ?? $ins->deal?->actual_delivery_date 
+                    ?? $ins->deal?->expected_delivery_date 
+                    ?? $ins->created_at?->format('Y-m-d') 
+                    ?? $todayStr;
+
+                $expireDate = $ins->next_insurance_date 
+                    ?? $ins->expiry_date 
+                    ?? Carbon::parse($deliveryDate)->copy()->addDays(365)->format('Y-m-d');
+
+                $reminderDate = Carbon::parse($expireDate)->subDays(15)->format('Y-m-d');
+
+                if ($todayStr > $expireDate) {
+                    $expiredCount++;
+                } elseif ($todayStr >= $reminderDate && $todayStr <= $expireDate) {
+                    $expiringSoonCount++;
+                } else {
+                    $activeCount++;
+                }
+
+                if ($ins->status === 'renewed') {
+                    $renewedCount++;
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Insurance stats retrieved successfully',
+                'data' => [
+                    'total' => $total,
+                    'active' => $activeCount,
+                    'expiring_soon' => $expiringSoonCount,
+                    'expired' => $expiredCount,
+                    'renewed' => $renewedCount,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('InsuranceController@stats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch insurance stats: ' . $e->getMessage(),
             ], 500);
         }
     }

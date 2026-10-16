@@ -408,4 +408,42 @@ class UserController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get User & Team KPI statistics from database
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $totalUsers = User::count();
+            $superAdmins = User::where(function ($q) {
+                $q->where('role', 'Super Admin')
+                  ->orWhere('role', 'admin');
+            })->count();
+            $salesTeam = User::where(function ($q) {
+                $q->whereIn('role', ['Sales Executive', 'Sales Manager'])
+                  ->orWhere('role', 'like', '%sales%');
+            })->count();
+            $registeredCustomers = User::where('role', 'Customer')->count();
+            $activeUsers = User::where('status', 'Active')->count();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'User stats retrieved successfully',
+                'data' => [
+                    'total_users' => $totalUsers,
+                    'super_admins' => $superAdmins,
+                    'sales_team' => $salesTeam,
+                    'registered_customers' => $registeredCustomers,
+                    'active_users' => $activeUsers,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('UserController@stats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch user stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

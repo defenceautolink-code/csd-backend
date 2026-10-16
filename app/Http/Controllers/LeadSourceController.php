@@ -213,4 +213,32 @@ class LeadSourceController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get Lead Source KPI statistics from database
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $totalChannels = LeadSource::count();
+            $activeChannels = LeadSource::where('status', 'Active')->count();
+            $topChannel = LeadSource::where('status', 'Active')->first()?->title ?? 'Showroom Walk-in';
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Lead source stats retrieved successfully',
+                'data' => [
+                    'total_channels' => $totalChannels,
+                    'active_channels' => $activeChannels,
+                    'top_channel' => $topChannel,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('LeadSourceController@stats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch lead source stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

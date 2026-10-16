@@ -235,4 +235,40 @@ class VehicleModelController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get Vehicle Model KPI statistics from database
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $totalModels = VehicleModel::count();
+            $fourWheelerModels = VehicleModel::where(function ($q) {
+                $q->where('vehicle_segment', '4 Wheeler')
+                  ->orWhere('vehicle_segment', 'like', '%4%');
+            })->count();
+            $twoWheelerModels = VehicleModel::where(function ($q) {
+                $q->where('vehicle_segment', '2 Wheeler')
+                  ->orWhere('vehicle_segment', 'like', '%2%');
+            })->count();
+            $activeModels = VehicleModel::where('status', 'Active')->count();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Vehicle model stats retrieved successfully',
+                'data' => [
+                    'total_models' => $totalModels,
+                    'four_wheeler_models' => $fourWheelerModels,
+                    'two_wheeler_models' => $twoWheelerModels,
+                    'active_models' => $activeModels,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('VehicleModelController@stats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch vehicle model stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

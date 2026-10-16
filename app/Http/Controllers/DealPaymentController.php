@@ -665,4 +665,46 @@ class DealPaymentController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get Invoice Register KPI statistics from database
+     */
+    public function invoiceStats(Request $request)
+    {
+        try {
+            $totalDeals = Deal::count();
+            $totalDealVolume = (float) Deal::sum('net_amount');
+            if ($totalDealVolume == 0) {
+                $totalDealVolume = (float) Deal::sum('total_amount');
+            }
+
+            $totalCollected = (float) DealPayment::where('status', '!=', 'rejected')->sum('amount');
+            $totalPending = max(0.0, $totalDealVolume - $totalCollected);
+            $totalInvoicesCount = DealPayment::where('status', '!=', 'rejected')
+                ->whereNotNull('invoice_no')
+                ->where('invoice_no', '!=', '')
+                ->count();
+            if ($totalInvoicesCount == 0) {
+                $totalInvoicesCount = DealPayment::where('status', '!=', 'rejected')->count();
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Invoice stats retrieved successfully',
+                'data' => [
+                    'total_deal_volume' => $totalDealVolume,
+                    'total_deals_count' => $totalDeals,
+                    'total_collected' => $totalCollected,
+                    'total_pending' => $totalPending,
+                    'total_invoices_count' => $totalInvoicesCount,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('DealPaymentController@invoiceStats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch invoice stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

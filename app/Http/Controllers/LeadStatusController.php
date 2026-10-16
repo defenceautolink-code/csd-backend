@@ -213,4 +213,32 @@ class LeadStatusController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get Lead Status KPI statistics from database
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $configuredStages = LeadStatus::count();
+            $activeStages = LeadStatus::where('status', 'Active')->count();
+            $initialStage = LeadStatus::where('status', 'Active')->first()?->name ?? 'New Lead';
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Lead status stats retrieved successfully',
+                'data' => [
+                    'configured_stages' => $configuredStages,
+                    'active_stages' => $activeStages,
+                    'initial_stage' => $initialStage,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('LeadStatusController@stats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch lead status stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

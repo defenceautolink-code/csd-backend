@@ -57,21 +57,6 @@ class FollowUpController extends Controller
                 $query->where('status', $request->status);
             }
 
-            // Filter by Due Schedule
-            $today = Carbon::today()->toDateString();
-            if ($request->filled('due_filter')) {
-                $dueFilter = strtolower($request->due_filter);
-                if ($dueFilter === 'today') {
-                    $query->whereDate('next_follow_up_date', $today);
-                } elseif ($dueFilter === 'overdue') {
-                    $query->whereDate('next_follow_up_date', '<', $today)
-                          ->whereNotIn('status', ['Won', 'Lost', 'Completed', 'Closed']);
-                } elseif ($dueFilter === 'upcoming') {
-                    $query->whereDate('next_follow_up_date', '>', $today)
-                          ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString());
-                }
-            }
-
             // Date Range on follow_up_date
             $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('date_from') ?? $request->input('from_date');
             $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('date_to') ?? $request->input('to_date');
@@ -87,6 +72,16 @@ class FollowUpController extends Controller
                     $query->whereDate('follow_up_date', '<=', $endDate);
                 }
             }
+
+            // KPI statistics calculation (scoped to user/role & date range, before search and tab filters)
+            $today = Carbon::today()->toDateString();
+            $kpiBaseQuery = clone $query;
+            $overdueCount = (clone $kpiBaseQuery)->whereDate('next_follow_up_date', '<', $today)
+                ->whereNotIn('status', ['Won', 'Lost', 'Completed', 'Closed'])->count();
+            $dueTodayCount = (clone $kpiBaseQuery)->whereDate('next_follow_up_date', $today)->count();
+            $upcomingCount = (clone $kpiBaseQuery)->whereDate('next_follow_up_date', '>', $today)
+                ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString())->count();
+            $totalCount = (clone $kpiBaseQuery)->count();
 
             // Search filter
             if ($request->filled('search')) {
@@ -107,14 +102,17 @@ class FollowUpController extends Controller
                 });
             }
 
-            // KPI statistics calculation
-            $kpiBaseQuery = clone $query;
-            $overdueCount = (clone $kpiBaseQuery)->whereDate('next_follow_up_date', '<', $today)
-                ->whereNotIn('status', ['Won', 'Lost', 'Completed', 'Closed'])->count();
-            $dueTodayCount = (clone $kpiBaseQuery)->whereDate('next_follow_up_date', $today)->count();
-            $upcomingCount = (clone $kpiBaseQuery)->whereDate('next_follow_up_date', '>', $today)
-                ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString())->count();
-            $totalCount = (clone $kpiBaseQuery)->count();
+            // Tab / Due Schedule Filter (Applies to the paginated list)
+            $tab = strtolower($request->input('tab', $request->input('due_filter', 'all')));
+            if ($tab === 'today') {
+                $query->whereDate('next_follow_up_date', $today);
+            } elseif ($tab === 'overdue') {
+                $query->whereDate('next_follow_up_date', '<', $today)
+                      ->whereNotIn('status', ['Won', 'Lost', 'Completed', 'Closed']);
+            } elseif ($tab === 'upcoming') {
+                $query->whereDate('next_follow_up_date', '>', $today)
+                      ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString());
+            }
 
             // Handle Pagination or Full List
             $isAll = $request->boolean('all') || $request->get('per_page') === 'all' || (int) $request->get('per_page') === -1;
@@ -525,6 +523,64 @@ class FollowUpController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred while fetching lead follow-ups.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get Follow-up KPI statistics from database
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+
+            $query = LeadFollowUp::query();
+
+            // Role-based Access Control
+            if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
+                $query->where(function ($q) use ($user) {
+                    $q->where('user_id', $user->id)
+                      ->orWhereHas('lead', function ($leadQuery) use ($user) {
+                          $leadQuery->where('assigned_to', $user->id)
+                                    ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                      });
+                });
+            }
+
+            // Date Range on follow_up_date
+            $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('from_date');
+            $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('to_date');
+            if (!empty($startDate)) {
+                $query->whereDate('follow_up_date', '>=', $startDate);
+            }
+            if (!empty($endDate)) {
+                $query->whereDate('follow_up_date', '<=', $endDate);
+            }
+
+            $today = Carbon::today()->toDateString();
+            $overdueCount = (clone $query)->whereDate('next_follow_up_date', '<', $today)
+                ->whereNotIn('status', ['Won', 'Lost', 'Completed', 'Closed'])->count();
+            $dueTodayCount = (clone $query)->whereDate('next_follow_up_date', $today)->count();
+            $upcomingCount = (clone $query)->whereDate('next_follow_up_date', '>', $today)
+                ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString())->count();
+            $totalCount = (clone $query)->count();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Follow-up stats retrieved successfully',
+                'data' => [
+                    'overdue' => $overdueCount,
+                    'due_today' => $dueTodayCount,
+                    'upcoming' => $upcomingCount,
+                    'total' => $totalCount,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('FollowUpController@stats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch follow-up stats: ' . $e->getMessage(),
             ], 500);
         }
     }

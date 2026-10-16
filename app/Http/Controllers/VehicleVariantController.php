@@ -368,4 +368,34 @@ class VehicleVariantController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get Vehicle Variant KPI statistics from database
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $totalVariants = VehicleVariant::count();
+            $activeTrims = VehicleVariant::where('status', 'Active')->count();
+            $mappedModels = VehicleVariant::distinct('model_id')->count('model_id');
+            $inactiveTrims = VehicleVariant::where('status', 'Inactive')->count();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Vehicle variant stats retrieved successfully',
+                'data' => [
+                    'total_variants' => $totalVariants,
+                    'active_trims' => $activeTrims,
+                    'mapped_models' => $mappedModels,
+                    'inactive_trims' => $inactiveTrims,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('VehicleVariantController@stats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch vehicle variant stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }
