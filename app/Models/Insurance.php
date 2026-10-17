@@ -93,12 +93,22 @@ class Insurance extends Model
      */
     public function getReminderDateAttribute(): ?string
     {
-        $targetDate = $this->next_insurance_date ?? $this->expiry_date;
-        if (!$targetDate) {
+        $rawReminder = $this->attributes['reminder_date'] ?? null;
+        if (!empty($rawReminder)) {
+            return Carbon::parse($rawReminder)->format('Y-m-d');
+        }
+
+        $targetDate = $this->policy_expiry_date ?? $this->attributes['policy_expiry_date'] ?? null;
+        if (empty($targetDate)) {
             return null;
         }
 
-        return Carbon::parse($targetDate)->subDays(15)->format('Y-m-d');
+        $days = (int) ($this->reminder_days_before ?? $this->attributes['reminder_days_before'] ?? 15);
+        if ($days <= 0) {
+            $days = 15;
+        }
+
+        return Carbon::parse($targetDate)->subDays($days)->format('Y-m-d');
     }
 
     /**

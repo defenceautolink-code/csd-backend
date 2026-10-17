@@ -435,46 +435,55 @@ class DealController extends Controller
                 if ($shouldCreateInsurance) {
                     $insDetails = is_array($insuranceInput) ? $insuranceInput : [];
 
-                    $delivDate = $validated['policy_start_date'] 
+                    $rawStartDate = $validated['policy_start_date'] 
                         ?? $request->input('policy_start_date') 
-                        ?? ($insDetails['policy_start_date'] ?? null)
-                        ?? $deal->actual_delivery_date 
+                        ?? ($insDetails['policy_start_date'] ?? null);
+                    $delivDate = !empty($rawStartDate) ? $rawStartDate : (
+                        $deal->actual_delivery_date 
                         ?? $deal->expected_delivery_date 
                         ?? $deal->booking_date 
-                        ?? now()->format('Y-m-d');
-
-                    $expiryDate = $validated['policy_expiry_date'] 
-                        ?? $request->input('policy_expiry_date') 
-                        ?? ($insDetails['policy_expiry_date'] ?? null)
-                        ?? \Illuminate\Support\Carbon::parse($delivDate)->addDays(365)->format('Y-m-d');
-
-                    $reminderDays = (int) (
-                        $validated['reminder_days_before'] 
-                        ?? $request->input('reminder_days_before') 
-                        ?? ($insDetails['reminder_days_before'] ?? 15)
+                        ?? now()->format('Y-m-d')
                     );
 
-                    $reminderDate = $validated['reminder_date'] 
+                    $rawExpiryDate = $validated['policy_expiry_date'] 
+                        ?? $request->input('policy_expiry_date') 
+                        ?? ($insDetails['policy_expiry_date'] ?? null);
+                    $expiryDate = !empty($rawExpiryDate) ? $rawExpiryDate : (
+                        \Illuminate\Support\Carbon::parse($delivDate)->addDays(365)->format('Y-m-d')
+                    );
+
+                    $rawReminderDays = $validated['reminder_days_before'] 
+                        ?? $request->input('reminder_days_before') 
+                        ?? ($insDetails['reminder_days_before'] ?? null);
+                    $reminderDays = !empty($rawReminderDays) ? (int) $rawReminderDays : null;
+
+                    $rawReminderDate = $validated['reminder_date'] 
                         ?? $request->input('reminder_date') 
-                        ?? ($insDetails['reminder_date'] ?? null)
-                        ?? \Illuminate\Support\Carbon::parse($expiryDate)->subDays($reminderDays)->format('Y-m-d');
+                        ?? ($insDetails['reminder_date'] ?? null);
+                    $reminderDate = !empty($rawReminderDate) ? $rawReminderDate : (
+                        $reminderDays ? \Illuminate\Support\Carbon::parse($expiryDate)->subDays($reminderDays)->format('Y-m-d') : null
+                    );
 
                     $insuranceCompany = $validated['insurance_company'] 
                         ?? $request->input('insurance_company') 
                         ?? ($insDetails['insurance_company'] ?? null);
+                    $insuranceCompany = !empty(trim((string)$insuranceCompany)) ? trim((string)$insuranceCompany) : null;
 
                     $policyNumber = $validated['policy_number'] 
                         ?? $request->input('policy_number') 
                         ?? ($insDetails['policy_number'] ?? null);
+                    $policyNumber = !empty(trim((string)$policyNumber)) ? trim((string)$policyNumber) : null;
 
-                    $insuranceType = $validated['insurance_type'] 
+                    $rawInsuranceType = $validated['insurance_type'] 
                         ?? $request->input('insurance_type') 
-                        ?? ($insDetails['insurance_type'] ?? 'Comprehensive');
+                        ?? ($insDetails['insurance_type'] ?? null);
+                    $insuranceType = !empty(trim((string)$rawInsuranceType)) ? trim((string)$rawInsuranceType) : null;
 
                     $vehicleNumber = $validated['vehicle_number'] 
                         ?? $request->input('vehicle_number') 
                         ?? ($insDetails['vehicle_number'] ?? null)
                         ?? $deal->registration_number;
+                    $vehicleNumber = !empty(trim((string)$vehicleNumber)) ? trim((string)$vehicleNumber) : null;
 
                     $premiumAmount = (float) (
                         $validated['premium_amount'] 
@@ -494,6 +503,7 @@ class DealController extends Controller
                         ?? $request->input('insurance_notes') 
                         ?? $request->input('insurance_note') 
                         ?? ($insDetails['notes'] ?? null);
+                    $insuranceNotes = !empty(trim((string)$insuranceNotes)) ? trim((string)$insuranceNotes) : null;
 
                     Insurance::create([
                         'deal_id' => $deal->id,
@@ -512,8 +522,8 @@ class DealController extends Controller
                         'insurance_company' => $insuranceCompany,
                         'policy_number' => $policyNumber,
                         'insurance_type' => $insuranceType,
-                        'policy_start_date' => $delivDate,
-                        'policy_expiry_date' => $expiryDate,
+                        'policy_start_date' => !empty($rawStartDate) ? $rawStartDate : null,
+                        'policy_expiry_date' => !empty($rawExpiryDate) ? $rawExpiryDate : null,
                         'delivery_date' => $delivDate,
                         'start_date' => $delivDate,
                         'expiry_date' => $expiryDate,
