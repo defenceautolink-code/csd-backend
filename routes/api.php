@@ -30,6 +30,8 @@ Route::get('/user', function (Request $request) {
 
 // Authentication & Profile APIs
 Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword']);
 Route::get('/auth/profile', [AuthController::class, 'profile']);
 Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
 Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
