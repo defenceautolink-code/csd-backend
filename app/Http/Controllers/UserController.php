@@ -219,7 +219,17 @@ class UserController extends Controller
                 $updateData['role'] = $request->role;
             }
             if ($request->filled('status')) {
-                $updateData['status'] = ucfirst(strtolower($request->status));
+                $statusFormatted = ucfirst(strtolower($request->status));
+                $updateData['status'] = $statusFormatted;
+                if ($statusFormatted === 'Inactive' || $statusFormatted === 'Disabled' || $statusFormatted === 'Blocked') {
+                    if (method_exists($user, 'tokens')) {
+                        $user->tokens()->delete();
+                    }
+                    \Illuminate\Support\Facades\DB::table('personal_access_tokens')
+                        ->where('tokenable_type', get_class($user))
+                        ->where('tokenable_id', $user->id)
+                        ->delete();
+                }
             }
             if ($photoPath) {
                 $updateData['profile_photo'] = $photoPath;
@@ -277,6 +287,15 @@ class UserController extends Controller
             if ($user->profile_photo && file_exists(public_path($user->profile_photo))) {
                 @unlink(public_path($user->profile_photo));
             }
+
+            // Immediately revoke and delete all personal access tokens for this user
+            if (method_exists($user, 'tokens')) {
+                $user->tokens()->delete();
+            }
+            \Illuminate\Support\Facades\DB::table('personal_access_tokens')
+                ->where('tokenable_type', get_class($user))
+                ->where('tokenable_id', $user->id)
+                ->delete();
 
             $user->delete();
 
