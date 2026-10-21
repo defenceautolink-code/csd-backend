@@ -50,7 +50,7 @@ return [
     |
     */
 
-    'expiration' => 1440, // 24 hours (1440 minutes)
+    'expiration' => null, // Never expire automatically (tokens remain valid until explicitly revoked)
 
     /*
     |--------------------------------------------------------------------------

@@ -202,14 +202,11 @@
     <table class="sheet-table">
         <thead>
             <tr>
-                <th style="width: 45%;">
+                <th style="width: 60%;">
                     CAR: {{ $quotation->subject ? strtoupper(str_replace(['Official Vehicle Quotation – ', 'Price Quotation – '], '', $quotation->subject)) : 'VEHICLE PROPOSAL' }}
                 </th>
-                <th style="width: 35%; text-align: center;">
+                <th style="width: 40%; text-align: center;">
                     MODEL: {{ $quotation->items->first()?->item_name ? strtoupper($quotation->items->first()->item_name) : 'STANDARD VARIANT' }}
-                </th>
-                <th style="width: 20%; text-align: center;">
-                    N.A
                 </th>
             </tr>
         </thead>
@@ -220,7 +217,6 @@
                     VARIENT: {{ $quotation->items->first()?->description ? strtoupper($quotation->items->first()->description) : 'PETROL' }}
                 </td>
                 <td style="text-align: center;">N.A</td>
-                <td style="text-align: center;">N.A</td>
             </tr>
 
             <!-- Itemized Rows -->
@@ -230,7 +226,6 @@
                     <td style="text-align: center; font-weight: bold;">
                         {{ $item->unit_price > 0 ? number_format($item->unit_price, 0) : ($item->description ?: 'INCLUDED') }}
                     </td>
-                    <td style="text-align: center; color: #64748b;">N.A</td>
                 </tr>
             @endforeach
 
@@ -238,7 +233,6 @@
                 <tr>
                     <td style="color: #dc2626;">M.S REWORD (DISCOUNT)</td>
                     <td style="text-align: center; color: #dc2626; font-weight: bold;">- {{ number_format($quotation->discount, 0) }}</td>
-                    <td style="text-align: center; color: #64748b;">N.A</td>
                 </tr>
             @endif
 
@@ -248,7 +242,6 @@
                 <td class="total-val" style="text-align: center;">
                     ₹ {{ number_format($quotation->grand_total, 0) }}/-
                 </td>
-                <td style="text-align: center; color: #64748b;">N.A</td>
             </tr>
         </tbody>
     </table>
