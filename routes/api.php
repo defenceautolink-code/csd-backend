@@ -106,10 +106,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // Trigger Birthday & Anniversary Greetings Dispatch
     Route::get('leads/send-greetings-now', [LeadController::class, 'sendGreetingsNow']);
 
+    // Dedicated Live KPI Stats API for Lead Pipeline Cards
+    Route::get('leads/stats', [LeadController::class, 'stats']);
+
     // Customer Leads Master CRUD API
     Route::apiResource('leads', LeadController::class);
 
     // Users Master CRUD & User Password API
+    Route::get('users/stats', [UserController::class, 'stats']);
     Route::put('users/{id}/profile', [UserController::class, 'updateProfile']);
     Route::post('users/{id}/change-password', [UserController::class, 'changePassword']);
     Route::apiResource('users', UserController::class);

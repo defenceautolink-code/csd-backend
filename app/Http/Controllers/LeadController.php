@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Brand;
+use App\Models\Deal;
 use App\Models\Lead;
 use App\Models\LeadAssignmentHistory;
 use App\Models\LeadSource;
@@ -1212,6 +1213,106 @@ class LeadController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => 'Failed to execute greetings automation: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Dedicated KPI Stats API for Lead Pipeline Cards
+     * Excludes converted / 'Deal Won' leads so that pipeline stats reflect active leads only
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+
+            $query = Lead::query();
+
+            // 1. Exclude converted / "Deal Won" leads
+            $query->where(function ($q) {
+                $q->whereNull('status_name')
+                  ->orWhere(function ($sq) {
+                      $sq->where('status_name', 'not like', '%Deal Won%')
+                         ->where('status_name', 'not like', '%Won%')
+                         ->where('status_name', 'not like', '%Converted%');
+                  });
+            });
+
+            // 2. Also exclude any leads that already have a record in deals table
+            try {
+                $convertedLeadIds = Deal::pluck('lead_id')->filter()->unique()->toArray();
+                if (!empty($convertedLeadIds)) {
+                    $query->whereNotIn('id', $convertedLeadIds);
+                }
+            } catch (\Throwable $dealErr) {
+                // Ignore if deals table is not yet migrated or empty
+            }
+
+            // 3. Role-Based Access: Sales Executive receives only their assigned leads
+            if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
+                $query->where(function ($q) use ($user) {
+                    $q->where('assigned_to', $user->id)
+                      ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                });
+            }
+
+            // 4. Optional Date Range Filtering
+            $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('from_date') ?? $request->input('date_from');
+            $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('to_date') ?? $request->input('date_to');
+            if (!empty($startDate)) {
+                $query->whereDate('created_at', '>=', $startDate);
+            }
+            if (!empty($endDate)) {
+                $query->whereDate('created_at', '<=', $endDate);
+            }
+
+            // 5. Compute Metrics for Cards
+            $totalActive = (clone $query)->count();
+
+            $hotInquiries = (clone $query)
+                ->whereRaw('LOWER(priority) = ?', ['hot'])
+                ->count();
+
+            $fourWheeler = (clone $query)
+                ->where(function ($q) {
+                    $q->where('vehicle_segment', 'like', '%4%')
+                      ->orWhere('vehicle_segment', '4 Wheeler');
+                })
+                ->count();
+
+            $twoWheeler = (clone $query)
+                ->where(function ($q) {
+                    $q->where('vehicle_segment', 'like', '%2%')
+                      ->orWhere('vehicle_segment', '2 Wheeler');
+                })
+                ->count();
+
+            // Overall Total Leads count (for reference)
+            $allLeadsQuery = Lead::query();
+            if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
+                $allLeadsQuery->where(function ($q) use ($user) {
+                    $q->where('assigned_to', $user->id)
+                      ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                });
+            }
+            $totalLeads = $allLeadsQuery->count();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Pipeline card stats retrieved successfully',
+                'data' => [
+                    'total_active_pipeline' => $totalActive,
+                    'hot_inquiries' => $hotInquiries,
+                    'four_wheeler_inquiries' => $fourWheeler,
+                    'two_wheeler_inquiries' => $twoWheeler,
+                    'total_leads' => $totalLeads,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('LeadController@stats error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching lead stats.',
             ], 500);
         }
     }
