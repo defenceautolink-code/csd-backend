@@ -211,13 +211,36 @@ class QuotationController extends Controller
                 'items',
             ]);
 
+            // Trash / Deleted Records Filter
+            $isTrashView = $request->get('status') === 'deleted' || $request->boolean('trash') || $request->get('filter') === 'deleted';
+            if ($isTrashView) {
+                $query->withTrashed()->where(function ($q) {
+                    $q->where('record_status', 'deleted')
+                      ->orWhereNotNull('deleted_at')
+                      ->orWhereHas('lead', function ($lq) {
+                          $lq->onlyTrashed()->orWhere('record_status', 'deleted');
+                      });
+                });
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
+                })->where(function ($q) {
+                    $q->whereNull('lead_id')
+                      ->orWhereHas('lead', function ($lq) {
+                          $lq->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
+                      });
+                });
+            }
+
             // Scoping for Sales Executive
             if ($user && $user->role === 'Sales Executive') {
                 $query->where(function ($q) use ($user) {
                     $q->where('created_by', $user->id)
                       ->orWhereHas('lead', function ($leadQuery) use ($user) {
-                          $leadQuery->where('assigned_to', $user->id)
-                                    ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                          $leadQuery->withTrashed()->where(function ($sq) use ($user) {
+                              $sq->where('assigned_to', $user->id)
+                                 ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                          });
                       });
                 });
             }
@@ -236,7 +259,7 @@ class QuotationController extends Controller
             }
 
             // Status Filter
-            if ($request->filled('status') && $request->status !== 'all') {
+            if ($request->filled('status') && $request->status !== 'all' && $request->status !== 'deleted') {
                 $query->where('status', strtolower($request->status));
             }
 
@@ -299,7 +322,7 @@ class QuotationController extends Controller
                 'payment_terms' => 'nullable|string',
                 'delivery_terms' => 'nullable|string',
                 'notes' => 'nullable|string',
-                'status' => 'nullable|in:draft,sent,accepted,rejected,expired',
+                'status' => 'nullable|in:pending,draft,sent,send,print,printed,accepted,rejected,expired',
                 'items' => 'required|array|min:1',
                 'items.*.item_name' => 'required|string|max:255',
                 'items.*.description' => 'nullable|string',
@@ -324,10 +347,14 @@ class QuotationController extends Controller
                 }
             }
 
-            // Auto-generate unique Quotation Number if empty
+            // Auto-generate unique Quotation Number if empty or already in use
             $quotationNumber = !empty($validated['quotation_number'])
                 ? trim($validated['quotation_number'])
                 : Quotation::generateQuotationNumber();
+
+            if (Quotation::withTrashed()->where('quotation_number', $quotationNumber)->exists()) {
+                $quotationNumber = Quotation::generateQuotationNumber();
+            }
 
             // Calculate authoritative financials on backend
             [$subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems] = $this->calculateFinancials($validated['items']);
@@ -352,7 +379,7 @@ class QuotationController extends Controller
                     'payment_terms' => $validated['payment_terms'] ?? null,
                     'delivery_terms' => $validated['delivery_terms'] ?? null,
                     'notes' => $validated['notes'] ?? null,
-                    'status' => $validated['status'] ?? 'draft',
+                    'status' => $validated['status'] ?? 'pending',
                     'created_by' => $user?->id,
                 ]);
 
@@ -499,7 +526,7 @@ class QuotationController extends Controller
                 'payment_terms' => 'nullable|string',
                 'delivery_terms' => 'nullable|string',
                 'notes' => 'nullable|string',
-                'status' => 'nullable|in:draft,sent,accepted,rejected,expired',
+                'status' => 'nullable|in:pending,draft,sent,send,print,printed,accepted,rejected,expired',
                 'items' => 'required|array|min:1',
                 'items.*.item_name' => 'required|string|max:255',
                 'items.*.description' => 'nullable|string',
@@ -593,6 +620,7 @@ class QuotationController extends Controller
                 }
             }
 
+            $quotation->update(['record_status' => 'deleted']);
             $quotation->delete();
 
             return response()->json([
@@ -783,4 +811,96 @@ class QuotationController extends Controller
 
         return [$subtotal, $totalDiscount, $totalTax, $grandTotal, $processedItems];
     }
+
+    /**
+     * Update quotation status directly (e.g. print, sent, pending)
+     */
+    public function updateStatus(Request $request, $id)
+    {
+        try {
+            $validated = $request->validate([
+                'status' => 'required|string|in:pending,draft,sent,send,print,printed,accepted,rejected,expired',
+            ]);
+
+            $quotation = Quotation::findOrFail($id);
+            $quotation->update([
+                'status' => strtolower($validated['status']),
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotation status updated successfully',
+                'data' => $quotation->fresh(['items', 'lead', 'creator']),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@updateStatus error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while updating status.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore a soft-deleted quotation
+     */
+    public function restore($id)
+    {
+        try {
+            $quotation = Quotation::withTrashed()->where('id', $id)->first();
+            if (!$quotation) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Deleted quotation not found.',
+                ], 404);
+            }
+            $quotation->update(['record_status' => 'active']);
+            $quotation->restore();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotation restored successfully',
+                'data' => $quotation->fresh(['items', 'lead', 'creator']),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@restore error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while restoring quotation.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Permanently Delete (Hard Delete) a quotation
+     */
+    public function forceDelete($id)
+    {
+        try {
+            $quotation = Quotation::withTrashed()->find($id);
+
+            if (!$quotation) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Quotation record not found.',
+                ], 404);
+            }
+
+            // Permanently remove child quotation items
+            $quotation->items()->delete();
+            $quotation->forceDelete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Quotation permanently deleted.',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuotationController@forceDelete error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while permanently deleting quotation.',
+            ], 500);
+        }
+    }
 }
+

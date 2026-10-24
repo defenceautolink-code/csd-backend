@@ -276,4 +276,42 @@ class BrandController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get Brand KPI statistics from database
+     */
+    public function stats(Request $request)
+    {
+        try {
+            $totalBrands = Brand::count();
+            $fourWheelerBrands = Brand::where(function ($q) {
+                $q->whereJsonContains('vehicle_type', '4 Wheeler')
+                  ->orWhere('vehicle_type', 'like', '%4 Wheeler%')
+                  ->orWhere('vehicle_type', 'like', '%4%');
+            })->count();
+            $twoWheelerBrands = Brand::where(function ($q) {
+                $q->whereJsonContains('vehicle_type', '2 Wheeler')
+                  ->orWhere('vehicle_type', 'like', '%2 Wheeler%')
+                  ->orWhere('vehicle_type', 'like', '%2%');
+            })->count();
+            $activeBrands = Brand::where('status', 'Active')->count();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Brand stats retrieved successfully',
+                'data' => [
+                    'total_brands' => $totalBrands,
+                    'four_wheeler_brands' => $fourWheelerBrands,
+                    'two_wheeler_brands' => $twoWheelerBrands,
+                    'active_brands' => $activeBrands,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('BrandController@stats error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch brand stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

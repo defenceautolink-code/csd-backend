@@ -34,9 +34,20 @@ class UserController extends Controller
                 $query->where('role', $request->role);
             }
 
-            // Filter by status
-            if ($request->filled('status')) {
-                $query->where('status', $request->status);
+            // Trash / Deleted Records Filter
+            $isTrashView = $request->get('status') === 'deleted' || $request->boolean('trash') || $request->get('filter') === 'deleted';
+            if ($isTrashView) {
+                $query->withTrashed()->where(function ($q) {
+                    $q->where('status', 'deleted')->orWhereNotNull('deleted_at');
+                });
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('status')->orWhere('status', '!=', 'deleted');
+                });
+                // Filter by status (Active / Inactive)
+                if ($request->filled('status')) {
+                    $query->where('status', $request->status);
+                }
             }
 
             // Handle Pagination or Full List
@@ -297,6 +308,7 @@ class UserController extends Controller
                 ->where('tokenable_id', $user->id)
                 ->delete();
 
+            $user->update(['status' => 'deleted']);
             $user->delete();
 
             return response()->json([
@@ -308,6 +320,38 @@ class UserController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred while deleting user.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore a soft-deleted user
+     */
+    public function restore($id)
+    {
+        try {
+            $user = User::withTrashed()->where('id', $id)->first();
+
+            if (!$user) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Deleted user not found',
+                ], 404);
+            }
+
+            $user->update(['status' => 'Active']);
+            $user->restore();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'User account restored successfully',
+                'data' => $user,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('UserController@restore error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while restoring user.',
             ], 500);
         }
     }
@@ -462,6 +506,53 @@ class UserController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => 'Failed to fetch user stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Permanently Delete (Hard Delete) a user account
+     */
+    public function forceDelete($id)
+    {
+        try {
+            $user = User::withTrashed()->find($id);
+
+            if (!$user) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'User account not found.',
+                ], 404);
+            }
+
+            if ($user->role === 'Super Admin') {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Super Admin accounts cannot be permanently deleted.',
+                ], 403);
+            }
+
+            if ($user->profile_photo && file_exists(public_path($user->profile_photo))) {
+                @unlink(public_path($user->profile_photo));
+            }
+
+            // Revoke tokens
+            \Illuminate\Support\Facades\DB::table('personal_access_tokens')
+                ->where('tokenable_type', get_class($user))
+                ->where('tokenable_id', $user->id)
+                ->delete();
+
+            $user->forceDelete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'User account permanently deleted.',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('UserController@forceDelete error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while permanently deleting user.',
             ], 500);
         }
     }

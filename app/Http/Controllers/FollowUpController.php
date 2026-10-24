@@ -23,16 +23,41 @@ class FollowUpController extends Controller
 
             $query = LeadFollowUp::with([
                 'user:id,name,email,phone,role',
-                'lead:id,name,email,phone,brand_id,brand_name,model_variant,priority,status_id,status_name,assigned_to,assigned_user_name',
+                'lead' => function ($lq) {
+                    $lq->withTrashed();
+                },
             ]);
+
+            // Trash / Deleted Records Filter
+            $isTrashView = $request->get('status') === 'deleted' || $request->boolean('trash') || $request->get('filter') === 'deleted';
+            if ($isTrashView) {
+                $query->withTrashed()->where(function ($q) {
+                    $q->where('record_status', 'deleted')
+                      ->orWhereNotNull('deleted_at')
+                      ->orWhereHas('lead', function ($lq) {
+                          $lq->onlyTrashed()->orWhere('record_status', 'deleted');
+                      });
+                });
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
+                })->where(function ($q) {
+                    $q->whereNull('lead_id')
+                      ->orWhereHas('lead', function ($lq) {
+                          $lq->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
+                      });
+                });
+            }
 
             // Role-based Access Control
             if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
                 $query->where(function ($q) use ($user) {
                     $q->where('user_id', $user->id)
                       ->orWhereHas('lead', function ($leadQuery) use ($user) {
-                          $leadQuery->where('assigned_to', $user->id)
-                                    ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                          $leadQuery->withTrashed()->where(function ($sq) use ($user) {
+                              $sq->where('assigned_to', $user->id)
+                                 ->orWhere('assigned_user_name', 'like', '%' . $user->name . '%');
+                          });
                       });
                 });
             }
@@ -53,7 +78,7 @@ class FollowUpController extends Controller
             }
 
             // Filter by Outcome Status
-            if ($request->filled('status')) {
+            if ($request->filled('status') && $request->status !== 'deleted') {
                 $query->where('status', $request->status);
             }
 
@@ -91,10 +116,12 @@ class FollowUpController extends Controller
                       ->orWhere('type', 'like', '%' . $search . '%')
                       ->orWhere('status', 'like', '%' . $search . '%')
                       ->orWhereHas('lead', function ($lq) use ($search) {
-                          $lq->where('name', 'like', '%' . $search . '%')
-                             ->orWhere('phone', 'like', '%' . $search . '%')
-                             ->orWhere('email', 'like', '%' . $search . '%')
-                             ->orWhere('model_variant', 'like', '%' . $search . '%');
+                          $lq->withTrashed()->where(function ($sq) use ($search) {
+                              $sq->where('name', 'like', '%' . $search . '%')
+                                 ->orWhere('phone', 'like', '%' . $search . '%')
+                                 ->orWhere('email', 'like', '%' . $search . '%')
+                                 ->orWhere('model_variant', 'like', '%' . $search . '%');
+                          });
                       })
                       ->orWhereHas('user', function ($uq) use ($search) {
                           $uq->where('name', 'like', '%' . $search . '%');
@@ -102,16 +129,18 @@ class FollowUpController extends Controller
                 });
             }
 
-            // Tab / Due Schedule Filter (Applies to the paginated list)
-            $tab = strtolower($request->input('tab', $request->input('due_filter', 'all')));
-            if ($tab === 'today') {
-                $query->whereDate('next_follow_up_date', $today);
-            } elseif ($tab === 'overdue') {
-                $query->whereDate('next_follow_up_date', '<', $today)
-                      ->whereNotIn('status', ['Won', 'Lost', 'Completed', 'Closed']);
-            } elseif ($tab === 'upcoming') {
-                $query->whereDate('next_follow_up_date', '>', $today)
-                      ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString());
+            // Tab / Due Schedule Filter (Applies to the paginated list, only when NOT trash view)
+            if (!$isTrashView) {
+                $tab = strtolower($request->input('tab', $request->input('due_filter', 'all')));
+                if ($tab === 'today') {
+                    $query->whereDate('next_follow_up_date', $today);
+                } elseif ($tab === 'overdue') {
+                    $query->whereDate('next_follow_up_date', '<', $today)
+                          ->whereNotIn('status', ['Won', 'Lost', 'Completed', 'Closed']);
+                } elseif ($tab === 'upcoming') {
+                    $query->whereDate('next_follow_up_date', '>', $today)
+                          ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString());
+                }
             }
 
             // Handle Pagination or Full List
@@ -210,7 +239,7 @@ class FollowUpController extends Controller
             }
 
             $request->validate([
-                'follow_up_date' => 'required|date',
+                'follow_up_date' => 'nullable|date',
                 'follow_up_time' => 'nullable|string|max:50',
                 'type' => 'required|string|max:100',
                 'notes' => 'nullable|string|max:5000',
@@ -246,8 +275,8 @@ class FollowUpController extends Controller
             $followUp = LeadFollowUp::create([
                 'lead_id' => $lead->id,
                 'user_id' => $userId,
-                'follow_up_date' => date('Y-m-d', strtotime($request->follow_up_date)),
-                'follow_up_time' => $request->follow_up_time,
+                'follow_up_date' => $request->filled('follow_up_date') ? date('Y-m-d', strtotime($request->follow_up_date)) : Carbon::today()->toDateString(),
+                'follow_up_time' => $request->filled('follow_up_time') ? $request->follow_up_time : Carbon::now()->format('h:i A'),
                 'type' => $request->type,
                 'notes' => $request->notes,
                 'next_follow_up_date' => $request->filled('next_follow_up_date') ? date('Y-m-d', strtotime($request->next_follow_up_date)) : null,
@@ -495,6 +524,7 @@ class FollowUpController extends Controller
                 }
             }
 
+            $followUp->update(['record_status' => 'deleted']);
             $followUp->delete();
 
             return response()->json([
@@ -584,4 +614,66 @@ class FollowUpController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Restore a soft-deleted follow-up interaction
+     */
+    public function restore($id)
+    {
+        try {
+            $followUp = LeadFollowUp::withTrashed()->where('id', $id)->first();
+            if (!$followUp) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Deleted follow-up interaction not found.',
+                ], 404);
+            }
+
+            $followUp->update(['record_status' => 'active']);
+            $followUp->restore();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Follow-up interaction restored successfully',
+                'data' => $followUp,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('FollowUpController@restore error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while restoring follow-up.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Permanently Delete (Hard Delete) a follow-up interaction
+     */
+    public function forceDelete($id)
+    {
+        try {
+            $followUp = LeadFollowUp::withTrashed()->find($id);
+
+            if (!$followUp) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Follow-up interaction record not found.',
+                ], 404);
+            }
+
+            $followUp->forceDelete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Follow-up interaction permanently deleted.',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('FollowUpController@forceDelete error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while permanently deleting follow-up.',
+            ], 500);
+        }
+    }
 }
+

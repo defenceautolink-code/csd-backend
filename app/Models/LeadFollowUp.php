@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class LeadFollowUp extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $table = 'lead_follow_ups';
 
@@ -24,6 +25,7 @@ class LeadFollowUp extends Model
         'is_discount_requested',
         'discount_amount',
         'proposed_price',
+        'record_status',
     ];
 
     /**
@@ -51,11 +53,11 @@ class LeadFollowUp extends Model
     }
 
     /**
-     * Relationship: Follow-up belongs to a Lead
+     * Relationship: Follow-up belongs to a Lead (including soft-deleted)
      */
     public function lead()
     {
-        return $this->belongsTo(Lead::class, 'lead_id');
+        return $this->belongsTo(Lead::class, 'lead_id')->withTrashed();
     }
 
     /**

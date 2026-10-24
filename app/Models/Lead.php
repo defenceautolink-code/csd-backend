@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Lead extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'name',
@@ -37,6 +38,7 @@ class Lead extends Model
         'discount_approval_status',
         'requested_discount',
         'approved_discount',
+        'record_status',
     ];
 
     /**
@@ -171,11 +173,11 @@ class Lead extends Model
     }
 
     /**
-     * Relationship: Lead has many follow-ups
+     * Relationship: Lead has many follow-ups (including soft-deleted)
      */
     public function followUps()
     {
-        return $this->hasMany(LeadFollowUp::class, 'lead_id')->latest();
+        return $this->hasMany(LeadFollowUp::class, 'lead_id')->withTrashed()->latest();
     }
 
     /**

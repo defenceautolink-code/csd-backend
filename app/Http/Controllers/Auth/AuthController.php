@@ -24,11 +24,24 @@ class AuthController extends Controller
                 'password' => ['required'],
             ]);
 
-            $user = User::where('email', $request->email)->first();
+            $user = User::withTrashed()->where('email', $request->email)->first();
 
             if (!$user || !Hash::check($request->password, $user->password)) {
                 throw ValidationException::withMessages([
                     'email' => ['The provided credentials are incorrect.'],
+                ]);
+            }
+
+            // User must be Active to login
+            if (strtolower($user->status ?? '') === 'deleted' || $user->trashed()) {
+                throw ValidationException::withMessages([
+                    'email' => ['Your account has been deleted. Please contact your system administrator.'],
+                ]);
+            }
+
+            if (strtolower($user->status ?? '') !== 'active') {
+                throw ValidationException::withMessages([
+                    'email' => ['Your account is inactive. Please contact your administrator.'],
                 ]);
             }
 
@@ -70,10 +83,13 @@ class AuthController extends Controller
                 $user = User::find($request->input('user_id') ?? $request->input('id'));
             }
 
-            if (!$user) {
+            if (!$user || strtolower($user->status ?? '') === 'deleted' || $user->trashed() || strtolower($user->status ?? '') !== 'active') {
+                if ($user && method_exists($user, 'tokens')) {
+                    $user->tokens()->delete();
+                }
                 return response()->json([
                     'status' => false,
-                    'message' => 'Unauthenticated or user not found',
+                    'message' => 'Unauthenticated or user account is deactivated/deleted.',
                 ], 401);
             }
 

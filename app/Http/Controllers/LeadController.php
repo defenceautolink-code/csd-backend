@@ -33,6 +33,18 @@ class LeadController extends Controller
                 'latestAssignment.assignedToUser',
             ]);
 
+            // Trash / Deleted Records Filter
+            $isTrashView = $request->get('status') === 'deleted' || $request->boolean('trash') || $request->get('filter') === 'deleted';
+            if ($isTrashView) {
+                $query->withTrashed()->where(function ($q) {
+                    $q->where('record_status', 'deleted')->orWhereNotNull('deleted_at');
+                });
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
+                });
+            }
+
             // Backend Role-Based Lead Access:
             // Sales Executive receives only their assigned leads
             if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
@@ -72,7 +84,7 @@ class LeadController extends Controller
             }
 
             // Filter by Status Name or Status ID
-            if ($request->filled('status')) {
+            if ($request->filled('status') && $request->status !== 'deleted') {
                 $query->where('status_name', $request->status);
             }
             if ($request->filled('status_id')) {
@@ -586,17 +598,134 @@ class LeadController extends Controller
                 ], 404);
             }
 
+            $lead->update(['record_status' => 'deleted']);
             $lead->delete();
+
+            // Cascade soft-delete customer's follow-ups and quotations
+            \App\Models\LeadFollowUp::where('lead_id', $lead->id)->update(['record_status' => 'deleted']);
+            \App\Models\LeadFollowUp::where('lead_id', $lead->id)->delete();
+
+            \App\Models\Quotation::where('lead_id', $lead->id)->update(['record_status' => 'deleted']);
+            \App\Models\Quotation::where('lead_id', $lead->id)->delete();
 
             return response()->json([
                 'status' => true,
-                'message' => 'Customer lead deleted successfully',
+                'message' => 'Customer lead and associated follow-ups & quotations deleted successfully',
             ]);
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('LeadController@destroy error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred while deleting lead.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore a soft-deleted customer lead
+     */
+    public function restore($id)
+    {
+        try {
+            $lead = Lead::withTrashed()->where('id', $id)->first();
+
+            if (!$lead) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Deleted lead not found',
+                ], 404);
+            }
+
+            $lead->update(['record_status' => 'active']);
+            $lead->restore();
+
+            // Cascade restore customer's follow-ups and quotations
+            \App\Models\LeadFollowUp::withTrashed()->where('lead_id', $lead->id)->update(['record_status' => 'active']);
+            \App\Models\LeadFollowUp::withTrashed()->where('lead_id', $lead->id)->restore();
+
+            \App\Models\Quotation::withTrashed()->where('lead_id', $lead->id)->update(['record_status' => 'active']);
+            \App\Models\Quotation::withTrashed()->where('lead_id', $lead->id)->restore();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Customer lead and associated follow-ups & quotations restored successfully',
+                'data' => $lead,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('LeadController@restore error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while restoring lead.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk Restore multiple customer leads
+     */
+    public function bulkRestore(Request $request)
+    {
+        try {
+            $ids = $request->input('ids', $request->input('lead_ids', []));
+            if (empty($ids) || !is_array($ids)) {
+                return response()->json(['status' => false, 'message' => 'No lead IDs provided.'], 422);
+            }
+
+            foreach ($ids as $id) {
+                $lead = Lead::withTrashed()->where('id', $id)->first();
+                if ($lead) {
+                    $lead->update(['record_status' => 'active']);
+                    $lead->restore();
+                    \App\Models\LeadFollowUp::withTrashed()->where('lead_id', $lead->id)->update(['record_status' => 'active']);
+                    \App\Models\LeadFollowUp::withTrashed()->where('lead_id', $lead->id)->restore();
+                    \App\Models\Quotation::withTrashed()->where('lead_id', $lead->id)->update(['record_status' => 'active']);
+                    \App\Models\Quotation::withTrashed()->where('lead_id', $lead->id)->restore();
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => count($ids) . ' leads and associated records restored successfully',
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while bulk restoring leads.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Permanently Delete (Hard Delete) a customer lead
+     */
+    public function forceDelete($id)
+    {
+        try {
+            $lead = Lead::withTrashed()->find($id);
+
+            if (!$lead) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Lead record not found.',
+                ], 404);
+            }
+
+            // Permanently delete associated records
+            \App\Models\LeadFollowUp::withTrashed()->where('lead_id', $lead->id)->forceDelete();
+            \App\Models\Quotation::withTrashed()->where('lead_id', $lead->id)->forceDelete();
+            \App\Models\LeadAssignmentHistory::where('lead_id', $lead->id)->delete();
+
+            $lead->forceDelete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Customer lead and all connected records permanently deleted.',
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('LeadController@forceDelete error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while permanently deleting lead.',
             ], 500);
         }
     }
@@ -615,7 +744,24 @@ class LeadController extends Controller
             ]);
 
             $ids = $request->input('ids', $request->input('lead_ids', []));
-            $count = Lead::whereIn('id', $ids)->delete();
+            $count = 0;
+            if (!empty($ids) && is_array($ids)) {
+                foreach ($ids as $id) {
+                    $lead = Lead::find($id);
+                    if ($lead) {
+                        $lead->update(['record_status' => 'deleted']);
+                        $lead->delete();
+
+                        \App\Models\LeadFollowUp::where('lead_id', $lead->id)->update(['record_status' => 'deleted']);
+                        \App\Models\LeadFollowUp::where('lead_id', $lead->id)->delete();
+
+                        \App\Models\Quotation::where('lead_id', $lead->id)->update(['record_status' => 'deleted']);
+                        \App\Models\Quotation::where('lead_id', $lead->id)->delete();
+
+                        $count++;
+                    }
+                }
+            }
 
             return response()->json([
                 'status' => true,

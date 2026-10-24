@@ -4,11 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
 class Quotation extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'lead_id',
@@ -32,6 +33,7 @@ class Quotation extends Model
         'status',
         'sent_at',
         'created_by',
+        'record_status',
     ];
 
     protected $casts = [
@@ -45,11 +47,11 @@ class Quotation extends Model
     ];
 
     /**
-     * Relationship: Quotation belongs to a Lead
+     * Relationship: Quotation belongs to a Lead (including soft-deleted)
      */
     public function lead()
     {
-        return $this->belongsTo(Lead::class, 'lead_id');
+        return $this->belongsTo(Lead::class, 'lead_id')->withTrashed();
     }
 
     /**
@@ -92,7 +94,8 @@ class Quotation extends Model
         $year = Carbon::now()->format('Y');
         $prefix = "QT-{$year}-";
 
-        $latest = self::where('quotation_number', 'like', "{$prefix}%")
+        $latest = self::withTrashed()
+            ->where('quotation_number', 'like', "{$prefix}%")
             ->orderBy('id', 'desc')
             ->first();
 
@@ -103,6 +106,14 @@ class Quotation extends Model
             $nextSeq = 1;
         }
 
-        return $prefix . str_pad((string) $nextSeq, 4, '0', STR_PAD_LEFT);
+        do {
+            $candidate = $prefix . str_pad((string) $nextSeq, 4, '0', STR_PAD_LEFT);
+            $exists = self::withTrashed()->where('quotation_number', $candidate)->exists();
+            if ($exists) {
+                $nextSeq++;
+            }
+        } while ($exists);
+
+        return $candidate;
     }
 }

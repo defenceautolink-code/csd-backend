@@ -66,9 +66,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('lead-statuses', LeadStatusController::class);
 
     // Brand Master CRUD API
+    Route::get('brands/stats', [BrandController::class, 'stats']);
     Route::apiResource('brands', BrandController::class);
 
     // Vehicle Model Master CRUD API
+    Route::get('models/stats', [VehicleModelController::class, 'stats']);
     Route::apiResource('models', VehicleModelController::class);
 
     // Vehicle Variant Master CRUD & Bulk Price Update API
@@ -87,8 +89,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('leads/{id}/assignments', [LeadAssignmentHistoryController::class, 'getByLead']);
 
     // Unified Lead Follow-Ups API (Role Managed)
+    Route::get('follow-ups/stats', [FollowUpController::class, 'stats']);
     Route::get('leads/{id}/follow-ups', [FollowUpController::class, 'getByLead']);
     Route::post('leads/{id}/follow-ups', [FollowUpController::class, 'store']);
+    Route::post('follow-ups/{id}/restore', [FollowUpController::class, 'restore']);
+    Route::delete('follow-ups/{id}/force', [FollowUpController::class, 'forceDelete']);
     Route::apiResource('follow-ups', FollowUpController::class);
 
     // Follow-up Discount Approval Workflow API (Admin & Sales Manager)
@@ -110,15 +115,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('leads/stats', [LeadController::class, 'stats']);
 
     // Customer Leads Master CRUD API
+    Route::post('leads/{id}/restore', [LeadController::class, 'restore']);
+    Route::post('leads/bulk-restore', [LeadController::class, 'bulkRestore']);
+    Route::delete('leads/{id}/force', [LeadController::class, 'forceDelete']);
     Route::apiResource('leads', LeadController::class);
 
     // Users Master CRUD & User Password API
     Route::get('users/stats', [UserController::class, 'stats']);
     Route::put('users/{id}/profile', [UserController::class, 'updateProfile']);
     Route::post('users/{id}/change-password', [UserController::class, 'changePassword']);
+    Route::post('users/{id}/restore', [UserController::class, 'restore']);
+    Route::delete('users/{id}/force', [UserController::class, 'forceDelete']);
     Route::apiResource('users', UserController::class);
 
     // Quotations API Routes
+    Route::patch('quotations/{id}/status', [QuotationController::class, 'updateStatus']);
+    Route::post('quotations/{id}/restore', [QuotationController::class, 'restore']);
+    Route::delete('quotations/{id}/force', [QuotationController::class, 'forceDelete']);
     Route::post('quotations/{id}/send', [QuotationController::class, 'sendEmail']);
     Route::get('quotations/{id}/pdf', [QuotationController::class, 'downloadPdf']);
     Route::apiResource('quotations', QuotationController::class);
