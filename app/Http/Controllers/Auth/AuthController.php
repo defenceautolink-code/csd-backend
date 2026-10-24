@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\User;
+use App\Models\ActivityLog;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
@@ -47,6 +48,15 @@ class AuthController extends Controller
 
             $token = $user->createToken('api-token')->plainTextToken;
 
+            // Record login log
+            ActivityLog::record([
+                'user_id' => $user->id,
+                'title' => 'User Logged In',
+                'module' => 'Authentication',
+                'action' => 'login',
+                'description' => "User {$user->name} ({$user->email}) logged in successfully.",
+            ]);
+
             return response()->json([
                 'status' => true,
                 'message' => 'Login successful',
@@ -67,6 +77,41 @@ class AuthController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred during authentication.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Authenticated user logout
+     */
+    public function logout(Request $request)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+
+            if ($user) {
+                ActivityLog::record([
+                    'user_id' => $user->id,
+                    'title' => 'User Logged Out',
+                    'module' => 'Authentication',
+                    'action' => 'logout',
+                    'description' => "User {$user->name} logged out.",
+                ]);
+
+                if (method_exists($user, 'currentAccessToken') && $user->currentAccessToken()) {
+                    $user->currentAccessToken()->delete();
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Logged out successfully',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('AuthController@logout error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Error during logout',
             ], 500);
         }
     }

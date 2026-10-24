@@ -21,6 +21,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\VehicleModelController;
 use App\Http\Controllers\VehiclePriceMasterController;
 use App\Http\Controllers\VehicleVariantController;
+use App\Http\Controllers\ActivityLogController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -50,6 +51,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/profile', [AuthController::class, 'profile']);
     Route::put('/auth/profile', [AuthController::class, 'updateProfile']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
+    Route::post('/auth/logout', [AuthController::class, 'logout']);
 
     // Sales Executive Dedicated APIs (Strictly scoped to authenticated user)
     Route::prefix('sales-executive')->group(function () {
@@ -200,5 +202,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('generate-invoice', [TokenBillingController::class, 'generateInvoice']);
         Route::get('export-csv', [TokenBillingController::class, 'exportInvoicesCsv']);
         Route::post('reset-demo', [TokenBillingController::class, 'resetDemo']);
+    });
+
+    // Activity Logs & Audit Trail APIs
+    Route::prefix('activity-logs')->group(function () {
+        Route::get('/', [ActivityLogController::class, 'index']);
+        Route::get('/filters', [ActivityLogController::class, 'getFilters']);
+        Route::get('/export', [ActivityLogController::class, 'export']);
     });
 });
