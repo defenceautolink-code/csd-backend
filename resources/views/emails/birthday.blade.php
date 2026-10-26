@@ -175,7 +175,7 @@
         <!-- Footer -->
         <div class="email-footer">
             <p><strong>DEFENCE AUTOLINK</strong></p>
-            <p>D-601, 6th Floor, S.G Business Hub, S.G Highway, Ahmedabad - 380060</p>
+            <p>D-601, S G Business Hub, S G Highway, Ahmedabad, Gujarat - 382470</p>
             <p>Helpline: +91 98000 11111 | Email: support@defenceautolink.com</p>
             <p style="margin-top: 10px; font-size: 11px; color: #cbd5e1;">© {{ date('Y') }} Defence Autolink. All rights reserved.</p>
         </div>

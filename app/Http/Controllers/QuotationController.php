@@ -258,9 +258,14 @@ class QuotationController extends Controller
                 });
             }
 
-            // Status Filter
+            // Task 2: Status filtering (frontend defaults to sent)
             if ($request->filled('status') && $request->status !== 'all' && $request->status !== 'deleted') {
-                $query->where('status', strtolower($request->status));
+                $st = strtolower(trim($request->status));
+                if ($st === 'sent') {
+                    $query->whereIn('status', ['sent', 'approved', 'send']);
+                } else {
+                    $query->where('status', $st);
+                }
             }
 
             // Filter by Lead ID
@@ -393,8 +398,8 @@ class QuotationController extends Controller
 
             $quotation->load(['items', 'lead', 'creator']);
 
-            // If quotation is created directly with 'sent' status and linked to a lead, log follow-up entry
-            if (($validated['status'] ?? 'draft') === 'sent' && !empty($validated['lead_id'])) {
+            // If quotation is linked to a lead, log follow-up entry and update lead status to Quotation Sent
+            if (!empty($validated['lead_id'])) {
                 $lead = Lead::find($validated['lead_id']);
                 if ($lead) {
                     LeadFollowUp::create([
@@ -402,8 +407,8 @@ class QuotationController extends Controller
                         'user_id' => $user?->id ?? ($lead->assigned_to ?? 1),
                         'follow_up_date' => now()->toDateString(),
                         'follow_up_time' => now()->format('h:i A'),
-                        'type' => 'Email',
-                        'notes' => "Quotation Sent: Official Quotation #{$quotationNumber} generated & sent for {$validated['subject']} (Grand Total: ₹" . number_format($grandTotal, 2) . ").",
+                        'type' => 'Quotation Sent',
+                        'notes' => "Quotation Sent: Official Quotation #{$quotationNumber} generated for {$validated['subject']} (Grand Total: ₹" . number_format($grandTotal, 2) . ").",
                         'status' => 'Completed',
                     ]);
 

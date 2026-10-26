@@ -51,10 +51,10 @@ class AuthController extends Controller
             // Record login log
             ActivityLog::record([
                 'user_id' => $user->id,
-                'title' => 'User Logged In',
                 'module' => 'Authentication',
                 'action' => 'login',
-                'description' => "User {$user->name} ({$user->email}) logged in successfully.",
+                'detail' => 'login of user - ' . ($user->name ?? $user->email),
+                'ip_address' => ActivityLog::getClientIpv4($request),
             ]);
 
             return response()->json([
@@ -92,10 +92,10 @@ class AuthController extends Controller
             if ($user) {
                 ActivityLog::record([
                     'user_id' => $user->id,
-                    'title' => 'User Logged Out',
                     'module' => 'Authentication',
                     'action' => 'logout',
-                    'description' => "User {$user->name} logged out.",
+                    'detail' => 'logout of user - ' . ($user->name ?? $user->email),
+                    'ip_address' => ActivityLog::getClientIpv4($request),
                 ]);
 
                 if (method_exists($user, 'currentAccessToken') && $user->currentAccessToken()) {

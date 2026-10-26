@@ -1,13 +1,82 @@
+@php
+    $firstItem = $quotation->items->first();
+    
+    // 1. CAR and MODEL
+    $carName = '';
+    $modelSpec = '';
+    if ($firstItem && str_contains($firstItem->item_name, '–')) {
+        $parts = explode('–', $firstItem->item_name);
+        $carName = trim($parts[0] ?? '');
+        $modelSpec = trim($parts[1] ?? '');
+    } elseif ($firstItem && str_contains($firstItem->item_name, '-')) {
+        $parts = explode('-', $firstItem->item_name);
+        $carName = trim($parts[0] ?? '');
+        $modelSpec = trim($parts[1] ?? '');
+    } elseif ($quotation->subject) {
+        $cleanSubj = trim(preg_replace('/^Official Vehicle Quotation\s*[–-]?\s*/i', '', $quotation->subject));
+        if (preg_match('/^(.*?)\s*\((.*?)\)$/', $cleanSubj, $matches)) {
+            $carName = trim($matches[1]);
+            $modelSpec = trim($matches[2]);
+        } else {
+            $carName = $cleanSubj;
+            $modelSpec = 'STANDARD';
+        }
+    }
+    if (empty($carName)) {
+        $carName = 'MARUTI SUZUKI BREZZA';
+    }
+    if (empty($modelSpec)) {
+        $modelSpec = 'ZXI DUAL TONE';
+    }
+
+    // 2. FUEL / VARIANT
+    $variantFuel = 'PETROL';
+    if ($firstItem && $firstItem->description && stripos($firstItem->description, 'Fuel / Variant Type:') !== false) {
+        $variantFuel = trim(preg_replace('/.*Fuel \/ Variant Type:\s*/i', '', $firstItem->description)) ?: 'PETROL';
+    }
+
+    // 3. PARAMETER VALUES
+    $csdPrice = ($firstItem && $firstItem->unit_price > 0) ? number_format($firstItem->unit_price, 0) : '';
+    $msReward = ($firstItem && $firstItem->discount > 0) ? number_format($firstItem->discount, 0) : ($quotation->discount > 0 ? number_format($quotation->discount, 0) : 'N.A');
+
+    $findVal = function($pattern) use ($quotation) {
+        $it = $quotation->items->first(function($item) use ($pattern) {
+            return stripos($item->item_name ?? '', $pattern) !== false;
+        });
+        if (!$it || !$it->unit_price || $it->unit_price <= 0) {
+            return 'N.A';
+        }
+        return number_format($it->unit_price, 0);
+    };
+
+    $gjRto = $findVal('Gujarat State RTO');
+    if ($gjRto === 'N.A') $gjRto = $findVal('GJ RTO');
+
+    $bhRto = $findVal('BH Series');
+    if ($bhRto === 'N.A') $bhRto = $findVal('BH RTO');
+
+    $crtm = $findVal('CRTM');
+    $insurance = $findVal('Insurance');
+    $accessories = $findVal('Accessories');
+    $warranty = $findVal('Warranty');
+    $diffAmtCash = $findVal('Difference');
+    if ($diffAmtCash === 'N.A') $diffAmtCash = $findVal('Cash Adjustment');
+
+    $displayDate = \Carbon\Carbon::parse($quotation->quotation_date ?? now())->format('d.m.y');
+    $clientName = strtoupper($quotation->customer_name ?? '');
+    $grandTotal = number_format($quotation->grand_total, 0);
+
+    $executiveName = $quotation->creator->name ?? 'Admin User';
+    $executivePhone = $quotation->creator->phone ?? '98000 11111';
+@endphp
 <!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="x-apple-disable-message-reformatting">
-    <title>{{ $quotation->subject }}</title>
+    <title>Official Quotation {{ $quotation->quotation_number }} - Defence Autolink</title>
     <style>
-        /* Resets & Base Styles */
         html, body {
             margin: 0 !important;
             padding: 0 !important;
@@ -19,286 +88,293 @@
             -ms-text-size-adjust: 100%;
         }
         * {
-            -ms-text-size-adjust: 100%;
-            -webkit-text-size-adjust: 100%;
             box-sizing: border-box;
         }
         table, td {
-            mso-table-lspace: 0pt !important;
-            mso-table-rspace: 0pt !important;
             border-collapse: collapse !important;
         }
-        img {
-            -ms-interpolation-mode: bicubic;
-            border: 0;
-            height: auto;
-            line-height: 100%;
-            outline: none;
-            text-decoration: none;
-        }
-
-        /* Container Layout */
         .email-wrapper {
             width: 100%;
             background-color: #f1f5f9;
-            padding: 20px 10px;
+            padding: 24px 12px;
         }
         .email-container {
-            max-width: 650px;
+            max-width: 660px;
             margin: 0 auto;
             background: #ffffff;
-            border-radius: 8px;
+            border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border: 1px solid #cbd5e1;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
         }
-
-        /* Header */
         .email-header {
-            background: linear-gradient(135deg, #1e3a8a, #2563eb);
-            padding: 30px 20px;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #2563eb 100%);
+            padding: 26px 24px;
             color: #ffffff;
             text-align: center;
         }
-        .email-header h1 {
-            margin: 0 0 6px 0;
-            font-size: 24px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
+        .logo-badge {
+            display: inline-block;
+            background: #ffffff;
+            color: #1e3a8a;
+            font-weight: 900;
+            font-size: 18px;
+            padding: 6px 14px;
+            border-radius: 8px;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        .header-title {
+            margin: 0 0 4px 0;
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: 1px;
             text-transform: uppercase;
             color: #ffffff;
         }
-        .email-header p {
+        .header-subtitle {
             margin: 0;
-            font-size: 13px;
-            color: #e0e7ff;
-            opacity: 0.95;
+            font-size: 12.5px;
+            color: #cbd5e1;
+            letter-spacing: 0.3px;
         }
-
-        /* Body */
         .email-body {
-            padding: 28px 24px;
+            padding: 26px 24px;
         }
         .greeting {
             font-size: 16px;
-            font-weight: 600;
+            font-weight: 700;
             color: #0f172a;
             margin-bottom: 12px;
         }
         .intro-text {
             font-size: 14px;
             line-height: 1.6;
-            color: #475569;
-            margin-bottom: 22px;
+            color: #334155;
+            margin-bottom: 20px;
         }
 
-        /* Quote Card */
-        .quote-card {
+        /* Vehicle Highlight Banner */
+        .vehicle-highlight-card {
             background: #f8fafc;
+            border: 1.5px solid #2563eb;
+            border-radius: 10px;
+            padding: 16px 18px;
+            margin-bottom: 22px;
+        }
+        .vh-title {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            color: #2563eb;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .vh-car-name {
+            font-size: 18px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+        .vh-model-spec {
+            font-size: 13.5px;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 12px;
+        }
+        .vh-meta-table {
+            width: 100%;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 10px;
+            margin-top: 10px;
+        }
+        .vh-meta-td {
+            font-size: 12.5px;
+            color: #64748b;
+            padding: 3px 0;
+        }
+        .vh-meta-val {
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        /* Dealership Card Table (1:1 replica of Defence Autolink Quotation Card) */
+        .quote-card-container {
+            border: 2px solid #334155;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 22px;
+            background: #ffffff;
+        }
+        .card-top-bar {
+            background: #f1f5f9;
+            padding: 12px 16px;
+            border-bottom: 2px solid #334155;
+        }
+        .top-table {
+            width: 100%;
+        }
+        .top-left {
+            font-size: 12px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .top-badge {
+            text-align: center;
+        }
+        .badge-box {
+            display: inline-block;
+            border: 1.5px solid #0f172a;
+            color: #b91c1c;
+            font-weight: 800;
+            font-size: 11.5px;
+            padding: 2px 14px;
+            letter-spacing: 1px;
+        }
+        .top-right {
+            text-align: right;
+            font-size: 12px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .breakdown-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .breakdown-table th {
+            background-color: #94a3b8;
+            color: #0f172a;
+            font-size: 12px;
+            font-weight: 800;
+            padding: 9px 12px;
+            border: 1px solid #334155;
+            text-transform: uppercase;
+        }
+        .breakdown-table td {
+            padding: 8px 12px;
+            font-size: 12px;
+            border: 1px solid #334155;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        .col-left {
+            width: 55%;
+            text-align: left;
+        }
+        .col-right {
+            width: 45%;
+            text-align: center;
+        }
+        .row-total-bar td {
+            background-color: #fef3c7;
+            padding: 11px 12px;
+        }
+        .total-title {
+            color: #92400e;
+            font-weight: 800;
+            font-size: 13px;
+        }
+        .total-amount {
+            color: #b91c1c;
+            font-weight: 900;
+            font-size: 15px;
+            text-align: center;
+        }
+
+        /* Attached PDF Callout Box */
+        .pdf-alert-box {
+            background-color: #ecfdf5;
+            border: 1.5px dashed #059669;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 22px;
+        }
+        .pdf-alert-title {
+            font-size: 13.5px;
+            font-weight: 700;
+            color: #065f46;
+            margin-bottom: 4px;
+        }
+        .pdf-alert-desc {
+            font-size: 12px;
+            color: #047857;
+            line-height: 1.45;
+            margin: 0;
+        }
+
+        /* Executive Contact Box */
+        .exec-box {
+            background-color: #f8fafc;
             border: 1px solid #e2e8f0;
             border-radius: 8px;
-            padding: 18px 16px;
-            margin-bottom: 22px;
+            padding: 14px 16px;
+            margin-bottom: 18px;
         }
-        .quote-info-table {
-            width: 100%;
-            margin-bottom: 16px;
-            border-collapse: collapse;
-        }
-        .quote-info-table td {
-            font-size: 13px;
-            padding: 5px 0;
-            vertical-align: top;
-        }
-        .label {
-            color: #64748b;
-            width: 38%;
-            font-weight: 500;
-        }
-        .val {
-            color: #0f172a;
-            font-weight: 600;
-            width: 62%;
-            word-break: break-word;
-        }
-
-        /* Responsive Table Wrapper */
-        .table-wrapper {
-            width: 100%;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            margin-top: 14px;
-        }
-        .items-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-            table-layout: fixed;
-        }
-        .items-table th {
-            background: #e2e8f0;
-            color: #1e293b;
-            text-align: left;
-            padding: 10px 8px;
-            font-weight: 600;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-        }
-        .items-table td {
-            padding: 10px 8px;
-            border-bottom: 1px solid #e2e8f0;
-            vertical-align: top;
-            word-break: break-word;
-            overflow-wrap: break-word;
-        }
-        .col-item { width: 44%; }
-        .col-qty { width: 12%; text-align: center; }
-        .col-price { width: 22%; text-align: right; }
-        .col-total { width: 22%; text-align: right; }
-
-        .item-title {
-            color: #0f172a;
-            font-weight: 600;
-            font-size: 13px;
-            line-height: 1.4;
-            display: block;
-        }
-        .item-desc {
-            color: #64748b;
+        .exec-title {
             font-size: 11px;
-            line-height: 1.35;
-            margin-top: 3px;
-            display: block;
-        }
-
-        .text-right { text-align: right !important; }
-        .text-center { text-align: center !important; }
-
-        /* Totals Box */
-        .total-box {
-            background: #eff6ff;
-            border-radius: 6px;
-            padding: 14px 16px;
-            margin-top: 18px;
-            border: 1px solid #bfdbfe;
-        }
-        .total-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 13px;
-            padding: 4px 0;
-            color: #334155;
-        }
-        .grand-total-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 16px;
-            font-weight: 700;
-            color: #1e3a8a;
-            border-top: 1px solid #93c5fd;
-            padding-top: 8px;
-            margin-top: 6px;
-        }
-
-        /* Terms & Notes */
-        .terms-box {
-            font-size: 12px;
-            color: #475569;
-            line-height: 1.5;
-            margin-top: 20px;
-            padding: 14px 16px;
-            background: #fafafa;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-        }
-        .terms-box p {
-            margin: 4px 0;
-        }
-
-        /* Footer */
-        .email-footer {
-            background: #f8fafc;
-            padding: 20px 15px;
-            text-align: center;
-            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.8px;
             color: #64748b;
-            border-top: 1px solid #e2e8f0;
+            text-transform: uppercase;
+            margin-bottom: 6px;
         }
-        .email-footer p {
-            margin: 4px 0;
+        .exec-name {
+            font-size: 14px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .exec-phone {
+            font-size: 13px;
+            color: #2563eb;
+            font-weight: 600;
+            margin-top: 2px;
         }
 
-        /* Mobile Responsive Media Queries */
+        /* Email Footer */
+        .email-footer {
+            background-color: #0f172a;
+            padding: 22px 20px;
+            color: #94a3b8;
+            font-size: 12px;
+            text-align: center;
+            line-height: 1.5;
+        }
+        .footer-company {
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 14px;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+        .footer-address {
+            color: #cbd5e1;
+            font-size: 11.5px;
+            margin-bottom: 6px;
+        }
+        .footer-disclaimer {
+            font-size: 10px;
+            color: #64748b;
+            margin-top: 10px;
+            border-top: 1px solid #1e293b;
+            padding-top: 10px;
+        }
+
         @media only screen and (max-width: 600px) {
             .email-wrapper {
-                padding: 5px 0 !important;
-            }
-            .email-container {
-                width: 100% !important;
-                max-width: 100% !important;
-                border-radius: 0 !important;
-                box-shadow: none !important;
+                padding: 8px 4px !important;
             }
             .email-header {
-                padding: 20px 15px !important;
-            }
-            .email-header h1 {
-                font-size: 19px !important;
-            }
-            .email-header p {
-                font-size: 12px !important;
+                padding: 20px 14px !important;
             }
             .email-body {
-                padding: 16px 12px !important;
+                padding: 18px 14px !important;
             }
-            .quote-card {
-                padding: 12px 10px !important;
-                margin-bottom: 16px !important;
+            .vh-car-name {
+                font-size: 16px !important;
             }
-            .quote-info-table td {
-                font-size: 12px !important;
-                padding: 4px 0 !important;
-            }
-            .label {
-                width: 42% !important;
-            }
-            .val {
-                width: 58% !important;
-            }
-            .items-table {
-                font-size: 11px !important;
-            }
-            .items-table th {
-                font-size: 10px !important;
-                padding: 8px 4px !important;
-            }
-            .items-table td {
-                padding: 8px 4px !important;
-                font-size: 11px !important;
-            }
-            .col-item { width: 40% !important; }
-            .col-qty { width: 10% !important; }
-            .col-price { width: 25% !important; }
-            .col-total { width: 25% !important; }
-            .item-title {
-                font-size: 11px !important;
-            }
-            .item-desc {
-                font-size: 10px !important;
-            }
-            .total-box {
-                padding: 10px 12px !important;
-            }
-            .total-row {
-                font-size: 12px !important;
-            }
-            .grand-total-row {
-                font-size: 14px !important;
-            }
-            .terms-box {
-                padding: 10px 12px !important;
+            .breakdown-table th, .breakdown-table td {
+                padding: 7px 8px !important;
                 font-size: 11px !important;
             }
         }
@@ -307,120 +383,156 @@
 <body>
     <div class="email-wrapper">
         <div class="email-container">
-            <!-- Header -->
+            <!-- Header with Defence Autolink Branding -->
             <div class="email-header">
-                <h1>DEFENCE AUTOLINK</h1>
-                <p>Official Vehicle Quotation & Price Estimate</p>
+                <div class="logo-badge">DA &bull; DEFENCE AUTOLINK</div>
+                <h1 class="header-title">DEFENCE AUTOLINK</h1>
+                <p class="header-subtitle">Official Vehicle Quotation & Dealership Price Estimate</p>
             </div>
 
-            <!-- Body -->
+            <!-- Body Content -->
             <div class="email-body">
                 <div class="greeting">Dear {{ $quotation->customer_name }},</div>
                 <p class="intro-text">
-                    Thank you for your interest in Defence Autolink. Please find below the detailed quotation as per your vehicle requirements. A PDF copy of the official quotation is also attached with this email for your records.
+                    Greetings from <strong>Defence Autolink</strong>! Thank you for inquiring with us. We are pleased to provide you with the official vehicle quotation for your requested car: <strong>{{ $carName }} ({{ $modelSpec }})</strong>.
+                    Please find the complete quotation card breakdown below and download the attached official PDF for your records, bank finance, and booking procedures.
                 </p>
 
-                <!-- Quotation Card Details -->
-                <div class="quote-card">
-                    <table class="quote-info-table" role="presentation">
+                <!-- Vehicle Highlight Snapshot Card -->
+                <div class="vehicle-highlight-card">
+                    <div class="vh-title">SELECTED VEHICLE DETAILS</div>
+                    <div class="vh-car-name">{{ strtoupper($carName) }}</div>
+                    <div class="vh-model-spec">Model & Variant: <strong>{{ strtoupper($modelSpec) }}</strong> &bull; Fuel: <strong>{{ strtoupper($variantFuel) }}</strong></div>
+                    
+                    <table class="vh-meta-table">
                         <tr>
-                            <td class="label">Quotation Number:</td>
-                            <td class="val">{{ $quotation->quotation_number }}</td>
+                            <td class="vh-meta-td" style="width: 50%;">
+                                Quotation Ref: <span class="vh-meta-val">{{ $quotation->quotation_number }}</span>
+                            </td>
+                            <td class="vh-meta-td" style="width: 50%; text-align: right;">
+                                Date: <span class="vh-meta-val">{{ $displayDate }}</span>
+                            </td>
                         </tr>
                         <tr>
-                            <td class="label">Quotation Date:</td>
-                            <td class="val">{{ \Carbon\Carbon::parse($quotation->quotation_date)->format('d M Y') }}</td>
-                        </tr>
-                        @if($quotation->valid_until)
-                        <tr>
-                            <td class="label">Valid Until:</td>
-                            <td class="val">{{ \Carbon\Carbon::parse($quotation->valid_until)->format('d M Y') }}</td>
-                        </tr>
-                        @endif
-                        <tr>
-                            <td class="label">Subject:</td>
-                            <td class="val">{{ $quotation->subject }}</td>
+                            <td class="vh-meta-td" style="width: 50%;">
+                                Dealership: <span class="vh-meta-val">Defence Autolink</span>
+                            </td>
+                            <td class="vh-meta-td" style="width: 50%; text-align: right;">
+                                Net Estimate: <span class="vh-meta-val" style="color: #b91c1c; font-size: 13.5px;">₹ {{ $grandTotal }}/-</span>
+                            </td>
                         </tr>
                     </table>
+                </div>
 
-                    <!-- Items Breakdown -->
-                    <div class="table-wrapper">
-                        <table class="items-table" role="presentation">
-                            <thead>
-                                <tr>
-                                    <th class="col-item">Item / Particulars</th>
-                                    <th class="col-qty text-center">Qty</th>
-                                    <th class="col-price text-right">Unit Price</th>
-                                    <th class="col-total text-right">Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach($quotation->items as $item)
-                                <tr>
-                                    <td class="col-item">
-                                        <span class="item-title">{{ $item->item_name }}</span>
-                                        @if($item->description)
-                                            <span class="item-desc">{{ $item->description }}</span>
-                                        @endif
-                                    </td>
-                                    <td class="col-qty text-center">{{ number_format($item->quantity, 0) }}</td>
-                                    <td class="col-price text-right">₹{{ number_format($item->unit_price, 2) }}</td>
-                                    <td class="col-total text-right">₹{{ number_format($item->total, 2) }}</td>
-                                </tr>
-                                @endforeach
-                            </tbody>
+                <!-- Official Defence Autolink Card Layout Table -->
+                <div class="quote-card-container">
+                    <div class="card-top-bar">
+                        <table class="top-table">
+                            <tr>
+                                <td class="top-left">DATE : {{ $displayDate }}</td>
+                                <td class="top-badge">
+                                    <span class="badge-box">QUOTATION</span>
+                                </td>
+                                <td class="top-right">
+                                    CLIENT: <span style="color: #2563eb;">{{ $clientName }}</span>
+                                </td>
+                            </tr>
                         </table>
                     </div>
 
-                    <!-- Totals -->
-                    <div class="total-box">
-                        <div class="total-row">
-                            <span>Subtotal:</span>
-                            <span>₹{{ number_format($quotation->subtotal, 2) }}</span>
-                        </div>
-                        @if($quotation->discount > 0)
-                        <div class="total-row" style="color: #dc2626;">
-                            <span>Discount:</span>
-                            <span>- ₹{{ number_format($quotation->discount, 2) }}</span>
-                        </div>
-                        @endif
-                        @if($quotation->tax > 0)
-                        <div class="total-row">
-                            <span>Tax / GST:</span>
-                            <span>₹{{ number_format($quotation->tax, 2) }}</span>
-                        </div>
-                        @endif
-                        <div class="grand-total-row">
-                            <span>Grand Total:</span>
-                            <span>₹{{ number_format($quotation->grand_total, 2) }}</span>
-                        </div>
-                    </div>
+                    <table class="breakdown-table">
+                        <thead>
+                            <tr>
+                                <th class="col-left">CAR: {{ strtoupper($carName) }}</th>
+                                <th class="col-right">MODEL: {{ strtoupper($modelSpec) }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>CSD PRICE</td>
+                                <td class="col-right" style="font-weight: 700;">{{ $csdPrice ?: 'N.A' }}</td>
+                            </tr>
+                            <tr>
+                                <td>GJ RTO</td>
+                                <td class="col-right">{{ $gjRto }}</td>
+                            </tr>
+                            <tr>
+                                <td>BH RTO * APPOROX</td>
+                                <td class="col-right">{{ $bhRto }}</td>
+                            </tr>
+                            <tr>
+                                <td>CRTM</td>
+                                <td class="col-right">{{ $crtm }}</td>
+                            </tr>
+                            <tr>
+                                <td>INSURANCE</td>
+                                <td class="col-right">{{ $insurance }}</td>
+                            </tr>
+                            <tr>
+                                <td>ACCESSORIES</td>
+                                <td class="col-right" style="font-weight: 700;">{{ $accessories }}</td>
+                            </tr>
+                            <tr>
+                                <td>WARRANTY</td>
+                                <td class="col-right">{{ $warranty }}</td>
+                            </tr>
+                            <tr>
+                                <td>M.S REWORD</td>
+                                <td class="col-right">{{ $msReward }}</td>
+                            </tr>
+                            <tr>
+                                <td>DIFFERENCE AMT CASH</td>
+                                <td class="col-right">{{ $diffAmtCash }}</td>
+                            </tr>
+                            <tr class="row-total-bar">
+                                <td class="total-title">ESTIMATED ON-ROAD PRICE</td>
+                                <td class="total-amount">₹ {{ $grandTotal }}/-</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
 
-                @if($quotation->payment_terms || $quotation->delivery_terms || $quotation->notes)
-                <div class="terms-box">
-                    @if($quotation->payment_terms)
-                        <p><strong>Payment Terms:</strong> {{ $quotation->payment_terms }}</p>
-                    @endif
-                    @if($quotation->delivery_terms)
-                        <p><strong>Delivery Terms:</strong> {{ $quotation->delivery_terms }}</p>
-                    @endif
-                    @if($quotation->notes)
-                        <p><strong>Notes:</strong> {{ $quotation->notes }}</p>
-                    @endif
+                <!-- Attached PDF Notice Callout -->
+                <div class="pdf-alert-box">
+                    <div class="pdf-alert-title">&#128206; Official Dealership PDF Card Attached</div>
+                    <p class="pdf-alert-desc">
+                        A signed and authorized copy of this quotation (<strong>Quotation-{{ $quotation->quotation_number }}.pdf</strong>) has been generated and attached to this email. You can directly view, download, or print it.
+                    </p>
+                </div>
+
+                @if(!empty($customMessage))
+                <div style="background: #f8fafc; border-left: 4px solid #2563eb; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: #334155;">
+                    <strong>Message from Sales Executive:</strong><br>
+                    {{ $customMessage }}
                 </div>
                 @endif
 
-                <p style="font-size: 13px; color: #475569; margin-top: 22px; line-height: 1.5;">
-                    If you have any questions or wish to proceed with the booking, please do not hesitate to contact our sales team at <strong>+91 98000 11111</strong> or reply directly to this email.
+                <!-- Executive / Contact Person -->
+                <div class="exec-box">
+                    <div class="exec-title">Sales Executive & Assistance</div>
+                    <div class="exec-name">{{ $executiveName }}</div>
+                    <div class="exec-phone">Phone / WhatsApp: +91 {{ $executivePhone }}</div>
+                    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+                        Authorized Multi-Brand Dealership Signatory &bull; Defence Autolink
+                    </div>
+                </div>
+
+                <p style="font-size: 13px; color: #475569; line-height: 1.5; margin-bottom: 0;">
+                    Should you require any customization, loan assistance, or test-drive booking, please feel free to reach out to our executive or reply directly to this email.
                 </p>
             </div>
 
             <!-- Footer -->
             <div class="email-footer">
-                <p><strong>DEFENCE AUTOLINK</strong></p>
-                <p>Main Ring Road Showroom, South Extension Part-II, New Delhi - 110049</p>
-                <p>Phone: +91 98000 11111 | Email: sales@defenceautolink.com</p>
+                <div class="footer-company">DEFENCE AUTOLINK</div>
+                <div class="footer-address">
+                    D-601, S G Business Hub, S G Highway, Ahmedabad, Gujarat - 382470
+                </div>
+                <div>Contact: +91 {{ $executivePhone }} &bull; Email: sales@defenceautolink.com</div>
+                <div class="footer-disclaimer">
+                    * Prices prevailing at the time of vehicle delivery will be applicable. Road tax and registration charges as per state RTO norms.<br>
+                    This is an electronically generated official quotation from Defence Autolink.
+                </div>
             </div>
         </div>
     </div>

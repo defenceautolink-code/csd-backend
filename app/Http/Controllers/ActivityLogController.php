@@ -11,24 +11,26 @@ use Carbon\Carbon;
 class ActivityLogController extends Controller
 {
     /**
-     * Get paginated activity logs with search, user, module, and date range filters
+     * Get paginated activity logs with search, user, module, action, and date filters
      */
     public function index(Request $request)
     {
         try {
-            $query = ActivityLog::with(['user:id,name,email,role'])->orderBy('id', 'desc');
+            $query = ActivityLog::with(['user:id,name,email,phone,role'])->orderBy('id', 'desc');
 
-            // 1. Search Query (Title, Module, Description, or User Name/Email)
+            // 1. Search Query (Module, Action, Detail, IP Address, or User Name/Phone/ID)
             if ($request->filled('search')) {
                 $search = trim($request->input('search'));
                 $query->where(function ($q) use ($search) {
-                    $q->where('title', 'like', "%{$search}%")
-                      ->orWhere('module', 'like', "%{$search}%")
+                    $q->where('module', 'like', "%{$search}%")
                       ->orWhere('action', 'like', "%{$search}%")
-                      ->orWhere('description', 'like', "%{$search}%")
+                      ->orWhere('detail', 'like', "%{$search}%")
+                      ->orWhere('ip_address', 'like', "%{$search}%")
                       ->orWhereHas('user', function ($uq) use ($search) {
                           $uq->where('name', 'like', "%{$search}%")
-                             ->orWhere('email', 'like', "%{$search}%");
+                             ->orWhere('phone', 'like', "%{$search}%")
+                             ->orWhere('email', 'like', "%{$search}%")
+                             ->orWhere('id', $search);
                       });
                 });
             }
@@ -43,27 +45,51 @@ class ActivityLogController extends Controller
                 $query->where('module', $request->module);
             }
 
-            // 4. Action Filter (insert, update, delete, login, logout, export)
+            // 4. Action Filter (add, edit, delete, login, logout, export)
             if ($request->filled('action') && $request->action !== 'all') {
-                $query->where('action', $request->action);
+                $query->where('action', strtolower($request->action));
             }
 
-            // 5. Date Range Filters (Start Date & End Date)
+            // 5. Date Range Filters (Calculated in Asia/Kolkata IST)
             if ($request->filled('start_date')) {
-                $query->whereDate('created_at', '>=', Carbon::parse($request->start_date)->startOfDay());
+                $start = Carbon::parse($request->start_date, 'Asia/Kolkata')->startOfDay()->setTimezone('UTC');
+                $query->where('created_at', '>=', $start);
             }
 
             if ($request->filled('end_date')) {
-                $query->whereDate('created_at', '<=', Carbon::parse($request->end_date)->endOfDay());
+                $end = Carbon::parse($request->end_date, 'Asia/Kolkata')->endOfDay()->setTimezone('UTC');
+                $query->where('created_at', '<=', $end);
             }
 
             $perPage = min((int) ($request->input('per_page', 15)), 100);
             $logs = $query->paginate($perPage);
 
+            // Map data items with User info and Indian Standard Time (IST)
+            $items = collect($logs->items())->map(function ($log) {
+                return [
+                    'id' => $log->id,
+                    'user_id' => $log->user_id,
+                    'user_name' => $log->user?->name ?? ($log->user_id ? "User #{$log->user_id}" : 'System'),
+                    'user_phone' => $log->user?->phone ?? '-',
+                    'user' => $log->user ? [
+                        'id' => $log->user->id,
+                        'name' => $log->user->name,
+                        'phone' => $log->user->phone,
+                        'email' => $log->user->email,
+                    ] : null,
+                    'module' => $log->module,
+                    'action' => $log->action,
+                    'detail' => $log->detail ?? '-',
+                    'ip_address' => $log->ip_address ?? '127.0.0.1',
+                    'created_at' => $log->created_at ? $log->created_at->timezone('Asia/Kolkata')->format('d M Y, h:i:s A') : '-',
+                    'raw_time' => $log->created_at ? $log->created_at->toIso8601String() : null,
+                ];
+            });
+
             return response()->json([
                 'status' => true,
                 'message' => 'Activity logs retrieved successfully',
-                'data' => $logs->items(),
+                'data' => $items,
                 'pagination' => [
                     'current_page' => $logs->currentPage(),
                     'last_page' => $logs->lastPage(),
@@ -82,7 +108,7 @@ class ActivityLogController extends Controller
     }
 
     /**
-     * Get distinct modules and users for filter dropdowns
+     * Get distinct modules, actions, and users for filter dropdowns
      */
     public function getFilters()
     {
@@ -90,10 +116,18 @@ class ActivityLogController extends Controller
             $modules = ActivityLog::select('module')
                 ->distinct()
                 ->whereNotNull('module')
+                ->orderBy('module')
                 ->pluck('module')
                 ->values();
 
-            $users = User::select('id', 'name', 'email', 'role')
+            $actions = ActivityLog::select('action')
+                ->distinct()
+                ->whereNotNull('action')
+                ->orderBy('action')
+                ->pluck('action')
+                ->values();
+
+            $users = User::select('id', 'name', 'phone', 'email')
                 ->orderBy('name')
                 ->get();
 
@@ -101,6 +135,7 @@ class ActivityLogController extends Controller
                 'status' => true,
                 'data' => [
                     'modules' => $modules,
+                    'actions' => $actions,
                     'users' => $users,
                 ],
             ]);
@@ -113,22 +148,33 @@ class ActivityLogController extends Controller
     }
 
     /**
-     * Export activity logs matching current filters to CSV/Excel
+     * Export activity logs matching current filters to CSV
      */
     public function export(Request $request)
     {
-        $query = ActivityLog::with(['user:id,name,email,role'])->orderBy('id', 'desc');
+        $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+        ActivityLog::record([
+            'user_id' => $user?->id,
+            'module' => 'Activity Logs',
+            'action' => 'export',
+            'detail' => 'export of activity logs - CSV',
+            'ip_address' => ActivityLog::getClientIpv4($request),
+        ]);
+
+        $query = ActivityLog::with(['user:id,name,email,phone,role'])->orderBy('id', 'desc');
 
         if ($request->filled('search')) {
             $search = trim($request->input('search'));
             $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('module', 'like', "%{$search}%")
+                $q->where('module', 'like', "%{$search}%")
                   ->orWhere('action', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%")
+                  ->orWhere('detail', 'like', "%{$search}%")
+                  ->orWhere('ip_address', 'like', "%{$search}%")
                   ->orWhereHas('user', function ($uq) use ($search) {
                       $uq->where('name', 'like', "%{$search}%")
-                         ->orWhere('email', 'like', "%{$search}%");
+                         ->orWhere('phone', 'like', "%{$search}%")
+                         ->orWhere('email', 'like', "%{$search}%")
+                         ->orWhere('id', $search);
                   });
             });
         }
@@ -142,52 +188,52 @@ class ActivityLogController extends Controller
         }
 
         if ($request->filled('action') && $request->action !== 'all') {
-            $query->where('action', $request->action);
+            $query->where('action', strtolower($request->action));
         }
 
         if ($request->filled('start_date')) {
-            $query->whereDate('created_at', '>=', Carbon::parse($request->start_date)->startOfDay());
+            $start = Carbon::parse($request->start_date, 'Asia/Kolkata')->startOfDay()->setTimezone('UTC');
+            $query->where('created_at', '>=', $start);
         }
 
         if ($request->filled('end_date')) {
-            $query->whereDate('created_at', '<=', Carbon::parse($request->end_date)->endOfDay());
+            $end = Carbon::parse($request->end_date, 'Asia/Kolkata')->endOfDay()->setTimezone('UTC');
+            $query->where('created_at', '<=', $end);
         }
 
-        $filename = "activity_logs_" . Carbon::now()->format('Y-m-d_H-i-s') . ".csv";
+        $filename = "activity_logs_" . Carbon::now('Asia/Kolkata')->format('Y-m-d_H-i-s') . ".csv";
 
         $response = new StreamedResponse(function () use ($query) {
             $handle = fopen('php://output', 'w');
             
-            // UTF-8 BOM for Excel compatibility with special characters
+            // UTF-8 BOM for Excel compatibility
             fputs($handle, "\xEF\xBB\xBF");
 
-            // Header row matching requested fields
+            // CSV Header: ID, User ID, User Name, User Mobile Number, Module, Action, Detail, IP Address, Date & Time (IST)
             fputcsv($handle, [
                 'ID',
-                'Title',
-                'Module',
-                'Action Type',
-                'Updated By (User ID)',
+                'User ID',
                 'User Name',
-                'User Email',
-                'IP Address',
-                'Description / Details',
-                'Date & Time',
+                'User Mobile Number',
+                'Module',
+                'Action',
+                'Detail',
+                'IP Address (IPv4)',
+                'Date & Time (IST)',
             ]);
 
             $query->chunk(500, function ($logs) use ($handle) {
                 foreach ($logs as $log) {
                     fputcsv($handle, [
                         $log->id,
-                        $log->title,
+                        $log->user_id ? "#{$log->user_id}" : 'System',
+                        $log->user ? $log->user->name : ($log->user_id ? "User #{$log->user_id}" : 'System'),
+                        $log->user?->phone ?? 'N/A',
                         $log->module,
                         strtoupper($log->action),
-                        $log->user_id ? "#{$log->user_id}" : 'N/A',
-                        $log->user ? $log->user->name : 'System / Deleted User',
-                        $log->user ? $log->user->email : 'N/A',
-                        $log->ip_address ?? 'N/A',
-                        $log->description ?? 'N/A',
-                        $log->created_at ? $log->created_at->format('Y-m-d H:i:s') : 'N/A',
+                        $log->detail ?? 'N/A',
+                        $log->ip_address ?? '127.0.0.1',
+                        $log->created_at ? $log->created_at->timezone('Asia/Kolkata')->format('d M Y, h:i:s A') : 'N/A',
                     ]);
                 }
             });
@@ -198,8 +244,43 @@ class ActivityLogController extends Controller
         $response->headers->set('Content-Type', 'text/csv; charset=UTF-8');
         $response->headers->set('Content-Disposition', 'attachment; filename="' . $filename . '"');
         $response->headers->set('Pragma', 'no-cache');
-        $response->headers->set('Expires', '0');
 
         return $response;
+    }
+
+    /**
+     * Log client-side actions (exports, imports, bulk operations, etc.)
+     */
+    public function logAction(Request $request)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            $module = $request->input('module', 'General');
+            $action = strtolower($request->input('action', 'export'));
+            $detail = $request->input('detail');
+
+            if (empty($detail)) {
+                $count = $request->input('count');
+                $format = strtoupper($request->input('format', 'CSV'));
+                $target = $count ? "{$count} records ({$format})" : "all records ({$format})";
+                $detail = "{$action} of " . strtolower($module) . " - {$target}";
+            }
+
+            $log = ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => $module,
+                'action' => $action,
+                'detail' => $detail,
+                'ip_address' => ActivityLog::getClientIpv4($request),
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Action logged successfully',
+                'data' => $log,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['status' => false, 'message' => $e->getMessage()], 500);
+        }
     }
 }

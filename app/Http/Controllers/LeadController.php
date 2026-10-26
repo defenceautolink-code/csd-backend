@@ -9,6 +9,7 @@ use App\Models\LeadAssignmentHistory;
 use App\Models\LeadSource;
 use App\Models\LeadStatus;
 use App\Models\User;
+use App\Models\ActivityLog;
 use Illuminate\Http\Request;
 
 class LeadController extends Controller
@@ -267,20 +268,13 @@ class LeadController extends Controller
                 $sourceId = $source ? $source->id : null;
             }
 
-            // Auto-fill status
-            $statusId = $request->filled('status_id') && is_numeric($request->status_id) ? (int) $request->status_id : null;
-            $statusName = $request->status_name;
-            if ($statusId && !$statusName) {
-                $status = LeadStatus::find($statusId);
-                $statusName = $status ? $status->name : 'New';
-            } elseif (!$statusId && $statusName) {
-                $status = LeadStatus::where('name', $statusName)->first();
-                $statusId = $status ? $status->id : null;
-            } elseif (!$statusId && !$statusName) {
-                $status = LeadStatus::where('name', 'New')->first() ?? LeadStatus::first();
-                $statusId = $status ? $status->id : null;
-                $statusName = $status ? $status->name : 'New';
+            // Auto-fill status: Default to static 'New'
+            $statusName = $request->status_name ?: ($request->status ?: 'New');
+            if (is_numeric($statusName) && $request->filled('status_id')) {
+                $statusObj = LeadStatus::find($statusName);
+                $statusName = $statusObj ? $statusObj->name : 'New';
             }
+            $statusId = null;
 
             // Vehicle segment normalization
             $segment = $request->filled('vehicle_segment') ? $request->vehicle_segment : ($modelObj->vehicle_segment ?? '4 Wheeler');
@@ -478,7 +472,7 @@ class LeadController extends Controller
                 'purchase_timeline' => 'nullable|string|max:100',
                 'source_id' => 'nullable|exists:lead_sources,id',
                 'source_name' => 'nullable|string|max:100',
-                'status_id' => 'nullable|exists:lead_statuses,id',
+                'status_id' => 'nullable',
                 'status_name' => 'nullable|string|max:100',
                 'assigned_to' => 'nullable',
                 'assigned_user_name' => 'nullable|string|max:100',
@@ -498,11 +492,13 @@ class LeadController extends Controller
                 $sourceName = $source ? $source->title : $sourceName;
             }
 
-            // Auto-fill status name if status_id provided
-            $statusName = $request->has('status_name') ? $request->status_name : $lead->status_name;
-            if ($request->filled('status_id')) {
+            // Auto-fill status name
+            $statusName = $request->input('status_name', $request->input('status', $lead->status_name ?: 'New'));
+            if ($request->filled('status_id') && is_numeric($request->status_id)) {
                 $status = LeadStatus::find($request->status_id);
                 $statusName = $status ? $status->name : $statusName;
+            } elseif ($request->filled('status_id') && !is_numeric($request->status_id)) {
+                $statusName = $request->status_id;
             }
 
             $assignedToInput = $request->has('assigned_to') ? $request->assigned_to : $lead->assigned_to;
@@ -1296,10 +1292,16 @@ class LeadController extends Controller
         }
 
         if (!$userId && !$userName) {
-            $user = User::where('status', 'Active')->first() ?? User::first();
-            if ($user) {
-                $userId = $user->id;
-                $userName = $user->role ? "{$user->name} ({$user->role})" : $user->name;
+            $authUser = request()->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            if ($authUser) {
+                $userId = $authUser->id;
+                $userName = $authUser->role ? "{$authUser->name} ({$authUser->role})" : $authUser->name;
+            } else {
+                $user = User::where('status', 'Active')->first() ?? User::first();
+                if ($user) {
+                    $userId = $user->id;
+                    $userName = $user->role ? "{$user->name} ({$user->role})" : $user->name;
+                }
             }
         }
 
@@ -1460,6 +1462,33 @@ class LeadController extends Controller
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred while fetching lead stats.',
             ], 500);
+        }
+    }
+
+    /**
+     * Log lead export activity from frontend
+     */
+    public function logExport(Request $request)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            $count = (int) $request->input('count', 0);
+            $type = $request->input('type', 'all');
+            $detail = $type === 'selected' 
+                ? "export of lead - {$count} selected leads" 
+                : "export of lead - all leads ({$count} records)";
+
+            ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => 'Lead',
+                'action' => 'export',
+                'detail' => $detail,
+                'ip_address' => ActivityLog::getClientIpv4($request),
+            ]);
+
+            return response()->json(['status' => true]);
+        } catch (\Throwable $e) {
+            return response()->json(['status' => false], 500);
         }
     }
 }

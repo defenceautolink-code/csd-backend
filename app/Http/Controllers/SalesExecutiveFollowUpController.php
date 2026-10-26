@@ -154,15 +154,9 @@ class SalesExecutiveFollowUpController extends Controller
                     'status' => 'pending',
                 ]);
 
-                // Ensure "Discount Pending" status exists and update lead
-                $discountPendingStatus = LeadStatus::firstOrCreate(
-                    ['name' => 'Discount Pending'],
-                    ['status' => 'Active']
-                );
-
+                // Keep main lead status as Follow-up while marking discount_approval_status as pending
                 $lead->update([
-                    'status_id' => $discountPendingStatus->id,
-                    'status_name' => 'Discount Pending',
+                    'status_name' => 'Follow-up',
                     'discount_approval_status' => 'pending',
                     'requested_discount' => $discountAmount,
                 ]);

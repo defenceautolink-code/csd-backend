@@ -541,18 +541,8 @@ class DealController extends Controller
                     ]);
                 }
 
-                // Update Lead status to "Deal Won" / Converted
-                $dealWonStatus = LeadStatus::where('name', 'like', '%Deal Won%')
-                    ->orWhere('name', 'like', '%Won%')
-                    ->orWhere('name', 'like', '%Converted%')
-                    ->first();
-
-                if ($dealWonStatus) {
-                    $lead->status_id = $dealWonStatus->id;
-                    $lead->status_name = $dealWonStatus->name;
-                } else {
-                    $lead->status_name = 'Deal Won';
-                }
+                // Update Lead status to "Deal & Booking"
+                $lead->status_name = 'Deal & Booking';
                 $lead->save();
 
                 // Log Follow-up history entry

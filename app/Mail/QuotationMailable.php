@@ -34,7 +34,16 @@ class QuotationMailable extends Mailable
      */
     public function envelope(): Envelope
     {
-        $subject = $this->customSubject ?: "Quotation {$this->quotation->quotation_number} – {$this->quotation->subject}";
+        if ($this->customSubject) {
+            $subject = $this->customSubject;
+        } else {
+            $cleanSubj = trim(preg_replace('/^Official Vehicle Quotation\s*[–-]?\s*/i', '', $this->quotation->subject ?? ''));
+            if ($cleanSubj) {
+                $subject = "Official Quotation: {$cleanSubj} – Defence Autolink [Ref: {$this->quotation->quotation_number}]";
+            } else {
+                $subject = "Official Vehicle Quotation – Defence Autolink [Ref: {$this->quotation->quotation_number}]";
+            }
+        }
 
         return new Envelope(
             subject: $subject,

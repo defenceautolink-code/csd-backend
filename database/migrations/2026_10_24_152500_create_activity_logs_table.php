@@ -11,17 +11,15 @@ return new class extends Migration
      */
     public function up(): void
     {
+        Schema::dropIfExists('activity_logs');
+
         Schema::create('activity_logs', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
-            $table->string('title');
-            $table->string('module')->default('General');
-            $table->string('action')->default('other'); // login, logout, insert, update, delete, export, import, other
-            $table->string('method', 10)->nullable(); // GET, POST, PUT, DELETE
-            $table->text('url')->nullable();
+            $table->string('module');
+            $table->string('action'); // add, edit, delete, login, logout, export, etc.
+            $table->text('detail')->nullable();
             $table->string('ip_address', 45)->nullable();
-            $table->text('user_agent')->nullable();
-            $table->text('description')->nullable();
             $table->timestamps();
 
             $table->index(['user_id', 'created_at']);

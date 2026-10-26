@@ -86,6 +86,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('leads/bulk-assign', [LeadController::class, 'bulkAssign']);
     Route::post('leads/bulk-import', [LeadController::class, 'bulkImport']);
     Route::post('leads/import', [LeadController::class, 'bulkImport']);
+    Route::post('leads/log-export', [LeadController::class, 'logExport']);
 
     // Specific Lead Assignment History Route
     Route::get('leads/{id}/assignments', [LeadAssignmentHistoryController::class, 'getByLead']);
@@ -209,5 +210,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [ActivityLogController::class, 'index']);
         Route::get('/filters', [ActivityLogController::class, 'getFilters']);
         Route::get('/export', [ActivityLogController::class, 'export']);
+        Route::post('/log-action', [ActivityLogController::class, 'logAction']);
     });
 });

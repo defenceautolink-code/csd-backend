@@ -65,6 +65,11 @@ class FollowUpController extends Controller
             // Filter by Lead ID
             if ($request->filled('lead_id')) {
                 $query->where('lead_id', $request->lead_id);
+            } elseif (!$isTrashView) {
+                // Task 2 & 3: Follow-Up Hub only shows records where Lead is in Follow-up or Quotation Sent stage
+                $query->whereHas('lead', function ($lq) {
+                    $lq->whereIn('status_name', ['Follow-up', 'Quotation Sent', 'Quotation sent', 'Quotation', 'In Follow-Up', 'Follow Up']);
+                });
             }
 
             // Filter by Sales Executive User ID
@@ -78,7 +83,9 @@ class FollowUpController extends Controller
             }
 
             // Filter by Outcome Status
-            if ($request->filled('status') && $request->status !== 'deleted') {
+            if ($request->filled('outcome') && $request->outcome !== 'all') {
+                $query->where('status', $request->outcome);
+            } elseif ($request->filled('status') && $request->status !== 'deleted' && $request->status !== 'all') {
                 $query->where('status', $request->status);
             }
 
@@ -245,8 +252,8 @@ class FollowUpController extends Controller
                 'notes' => 'nullable|string|max:5000',
                 'next_follow_up_date' => 'nullable|date',
                 'next_follow_up_time' => 'nullable|string|max:50',
-                'status' => 'required|string|max:50',
-                'lead_status_id' => 'nullable|exists:lead_statuses,id',
+                'status' => 'required|string|max:100',
+                'lead_status_id' => 'nullable',
                 'lead_status_name' => 'nullable|string|max:100',
                 'is_discount_requested' => 'nullable',
                 'discount_amount' => 'nullable|numeric|min:0',
@@ -272,6 +279,8 @@ class FollowUpController extends Controller
                 ], 422);
             }
 
+            $outcomeStr = trim($request->status ?? $request->outcome ?? 'Interested / Call Back');
+
             $followUp = LeadFollowUp::create([
                 'lead_id' => $lead->id,
                 'user_id' => $userId,
@@ -281,7 +290,7 @@ class FollowUpController extends Controller
                 'notes' => $request->notes,
                 'next_follow_up_date' => $request->filled('next_follow_up_date') ? date('Y-m-d', strtotime($request->next_follow_up_date)) : null,
                 'next_follow_up_time' => $request->next_follow_up_time,
-                'status' => ucfirst(strtolower($request->status)),
+                'status' => $outcomeStr,
                 'is_discount_requested' => $isDiscountRequested,
                 'discount_amount' => $isDiscountRequested ? $discountAmount : null,
                 'proposed_price' => $isDiscountRequested ? $proposedPrice : null,
@@ -299,38 +308,25 @@ class FollowUpController extends Controller
                     'status' => 'pending',
                 ]);
 
-                // Ensure "Discount Pending" status exists and update lead
-                $discountPendingStatus = LeadStatus::firstOrCreate(
-                    ['name' => 'Discount Pending'],
-                    ['status' => 'Active']
-                );
-
                 $lead->update([
-                    'status_id' => $discountPendingStatus->id,
-                    'status_name' => 'Discount Pending',
+                    'status_name' => 'Follow-up',
                     'discount_approval_status' => 'pending',
                     'requested_discount' => $discountAmount,
                 ]);
             } else {
-                // If lead status updated as part of regular follow-up interaction
-                if ($request->filled('lead_status_id') || $request->filled('lead_status_name')) {
-                    $statusName = $request->lead_status_name;
-                    $statusId = $request->lead_status_id;
-
-                    if ($statusId && !$statusName) {
-                        $st = LeadStatus::find($statusId);
-                        $statusName = $st ? $st->name : null;
-                    } elseif ($statusName && !$statusId) {
-                        $st = LeadStatus::where('name', $statusName)->first();
-                        $statusId = $st ? $st->id : null;
+                // Task 1 & 2: Automatically transition lead status
+                if ($lead) {
+                    if (stripos($outcomeStr, 'Deal Won') !== false || stripos($outcomeStr, 'Booking') !== false) {
+                        $targetLeadStatus = 'Deal & Booking';
+                    } elseif (stripos($outcomeStr, 'Lost') !== false) {
+                        $targetLeadStatus = 'Lost';
+                    } else {
+                        $targetLeadStatus = $request->lead_status_name ?: 'Follow-up';
                     }
 
-                    if ($statusName || $statusId) {
-                        $lead->update([
-                            'status_id' => $statusId ?: $lead->status_id,
-                            'status_name' => $statusName ?: $lead->status_name,
-                        ]);
-                    }
+                    $lead->update([
+                        'status_name' => $targetLeadStatus,
+                    ]);
                 }
             }
 
