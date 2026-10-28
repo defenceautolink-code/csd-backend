@@ -9,6 +9,7 @@ use App\Models\LeadStatus;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class FollowUpController extends Controller
@@ -152,6 +153,80 @@ class FollowUpController extends Controller
 
             // Handle Pagination or Full List
             $isAll = $request->boolean('all') || $request->get('per_page') === 'all' || (int) $request->get('per_page') === -1;
+            $shouldGroup = !$request->filled('lead_id') && ($request->get('grouped') !== 'false' && !$request->boolean('raw'));
+
+            if ($shouldGroup) {
+                // Group by lead/customer: 1 Customer = 1 Row with their latest follow-up and total follow-up count
+                $groupExpr = DB::raw('COALESCE(lead_id, id)');
+
+                $groupedRows = (clone $query)
+                    ->selectRaw('MAX(id) as latest_id, COUNT(*) as total_calls')
+                    ->groupBy($groupExpr)
+                    ->get();
+
+                $groupedStats = [];
+                foreach ($groupedRows as $grow) {
+                    $groupedStats[$grow->latest_id] = (int) $grow->total_calls;
+                }
+
+                $latestIds = array_keys($groupedStats);
+                rsort($latestIds);
+                $totalCustomers = count($latestIds);
+
+                $perPage = (int) ($request->get('per_page') ?? $request->get('limit') ?? $request->get('pageSize') ?? 10);
+                $perPage = $perPage > 0 ? $perPage : 10;
+                $page = (int) ($request->get('page') ?? 1);
+                $page = $page > 0 ? $page : 1;
+
+                if ($isAll) {
+                    $pageIds = $latestIds;
+                } else {
+                    $pageIds = array_slice($latestIds, ($page - 1) * $perPage, $perPage);
+                }
+
+                $records = [];
+                if (!empty($pageIds)) {
+                    $items = LeadFollowUp::with([
+                        'user:id,name,email,phone,role',
+                        'lead' => function ($lq) {
+                            $lq->withTrashed();
+                        },
+                    ])->whereIn('id', $pageIds)->get()->keyBy('id');
+
+                    // Preserve sorted order (latest interaction first)
+                    foreach ($pageIds as $pid) {
+                        if (isset($items[$pid])) {
+                            $record = $items[$pid];
+                            $record->follow_ups_count = (int) ($groupedStats[$pid] ?? 1);
+                            $records[] = $record;
+                        }
+                    }
+                }
+
+                $lastPage = $isAll ? 1 : (int) ceil($totalCustomers / $perPage);
+                $from = $totalCustomers > 0 ? (($page - 1) * $perPage + 1) : null;
+                $to = $totalCustomers > 0 ? min($page * $perPage, $totalCustomers) : null;
+
+                return response()->json([
+                    'status' => true,
+                    'message' => 'Follow-ups retrieved successfully',
+                    'kpis' => [
+                        'overdue' => $overdueCount,
+                        'due_today' => $dueTodayCount,
+                        'upcoming' => $upcomingCount,
+                        'total' => $totalCount,
+                    ],
+                    'data' => $records,
+                    'pagination' => [
+                        'current_page' => $page,
+                        'last_page' => max(1, $lastPage),
+                        'per_page' => $isAll ? $totalCustomers : $perPage,
+                        'total' => $totalCustomers,
+                        'from' => $from,
+                        'to' => $to,
+                    ],
+                ]);
+            }
 
             if (!$isAll) {
                 $perPage = (int) ($request->get('per_page') ?? $request->get('limit') ?? $request->get('pageSize') ?? 15);
