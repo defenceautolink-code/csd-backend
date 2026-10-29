@@ -232,6 +232,7 @@ class QuotationController extends Controller
                 });
             }
 
+
             // Scoping for Sales Executive
             if ($user && $user->role === 'Sales Executive') {
                 $query->where(function ($q) use ($user) {
@@ -243,6 +244,7 @@ class QuotationController extends Controller
                           });
                       });
                 });
+                
             }
 
             // Search Filter

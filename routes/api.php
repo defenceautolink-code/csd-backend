@@ -22,6 +22,7 @@ use App\Http\Controllers\VehicleModelController;
 use App\Http\Controllers\VehiclePriceMasterController;
 use App\Http\Controllers\VehicleVariantController;
 use App\Http\Controllers\ActivityLogController;
+use App\Http\Controllers\DashboardController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -53,8 +54,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
 
+    // Dedicated Super Admin Live Dashboard API
+    Route::get('dashboard/stats', [DashboardController::class, 'stats']);
+    Route::get('dashboard/sales-executive-stats', [DashboardController::class, 'salesExecutiveStats']);
+    Route::get('dashboard/receptionist-stats', [DashboardController::class, 'receptionistStats']);
+
+    // Receptionist Dedicated APIs
+    Route::prefix('receptionist')->group(function () {
+        Route::get('/dashboard/stats', [DashboardController::class, 'receptionistStats']);
+    });
+
     // Sales Executive Dedicated APIs (Strictly scoped to authenticated user)
     Route::prefix('sales-executive')->group(function () {
+        Route::get('/dashboard/stats', [DashboardController::class, 'salesExecutiveStats']);
         Route::get('/leads', [SalesExecutiveLeadController::class, 'index']);
         Route::get('/leads/{lead}', [SalesExecutiveLeadController::class, 'show']);
         Route::get('/leads/{lead}/follow-ups', [FollowUpController::class, 'getByLead']);
