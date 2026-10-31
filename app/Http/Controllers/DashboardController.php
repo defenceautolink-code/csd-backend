@@ -3,9 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\ActivityLog;
+use App\Models\CustomerToken;
 use App\Models\Deal;
 use App\Models\DealPayment;
 use App\Models\DiscountApproval;
+use App\Models\Expense;
+use App\Models\ExpenseCategory;
+use App\Models\InstallmentInvoice;
 use App\Models\Lead;
 use App\Models\LeadFollowUp;
 use App\Models\Quotation;
@@ -33,6 +37,10 @@ class DashboardController extends Controller
                 return $this->receptionistStats($request);
             }
 
+            if ($request->get('role') === 'Accountant' || ($user && in_array(strtolower(str_replace(' ', '_', $user->role ?? '')), ['accountant', 'accounts']))) {
+                return $this->accountantStats($request);
+            }
+
             // 1. KPI Cards (5 Primary Metrics for Dashboard)
             $totalLeads = Lead::count();
             
@@ -47,13 +55,58 @@ class DashboardController extends Controller
                 ? round((($leadsThisMonth - $leadsLastMonth) / $leadsLastMonth) * 100)
                 : ($leadsThisMonth > 0 ? 100 : 0);
 
-            // 1) Total Follow-Up
-            $totalFollowUp = Lead::where(function ($q) {
-                $q->where('status_name', 'like', '%Follow%');
+            // 2. Follow-Up Outcome Pipeline Stages (Each customer counted by their LATEST follow-up outcome only)
+            $followUpBase = LeadFollowUp::where(function ($q) {
+                $q->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
+            });
+
+            $latestFollowUpIds = (clone $followUpBase)
+                ->selectRaw('MAX(id) as latest_id')
+                ->groupBy(DB::raw('COALESCE(lead_id, id)'))
+                ->pluck('latest_id');
+
+            $pipelineFollowUps = LeadFollowUp::whereIn('id', $latestFollowUpIds);
+
+            // 1) Interested / Call Back
+            $countInterested = (clone $pipelineFollowUps)->where(function ($q) {
+                $q->where('status', 'like', '%Interested%')
+                  ->orWhere('status', 'like', '%Call Back%');
             })->count();
-            if ($totalFollowUp === 0) {
-                $totalFollowUp = LeadFollowUp::distinct('lead_id')->count() ?: LeadFollowUp::count();
-            }
+
+            // 2) Quotation Requested
+            $countQuotationReq = (clone $pipelineFollowUps)->where(function ($q) {
+                $q->where('status', 'like', '%Quotation%')
+                  ->orWhere('status', 'like', '%Quote%')
+                  ->orWhere('status', 'like', '%Sent%');
+            })->count();
+
+            // 3) Negotiation / Price Discussion
+            $countNegotiation = (clone $pipelineFollowUps)->where(function ($q) {
+                $q->where('status', 'like', '%Negotiation%')
+                  ->orWhere('status', 'like', '%Price%');
+            })->count();
+
+            // 4) Not Reachable / Busy
+            $countNotReachable = (clone $pipelineFollowUps)->where(function ($q) {
+                $q->where('status', 'like', '%Not Reachable%')
+                  ->orWhere('status', 'like', '%Busy%');
+            })->count();
+
+            // 5) Lost to Competitor / Lost of Lead
+            $countLost = (clone $pipelineFollowUps)->where(function ($q) {
+                $q->where('status', 'like', '%Lost%');
+            })->count();
+
+            // 6) Deal Won / Booking
+            $countDealWon = (clone $pipelineFollowUps)->where(function ($q) {
+                $q->where('status', 'like', '%Deal%')
+                  ->orWhere('status', 'like', '%Booking%')
+                  ->orWhere('status', 'like', '%Won%')
+                  ->orWhere('status', 'like', '%Completed%');
+            })->count();
+
+            // 1) Total Follow-Up: only count active follow-ups matching SS 2 statuses
+            $totalFollowUp = $countInterested + $countQuotationReq + $countNegotiation + $countNotReachable;
 
             // 2) Total Quotation
             $totalQuotation = Lead::where(function ($q) {
@@ -90,49 +143,6 @@ class DashboardController extends Controller
             $deliveriesCount = Deal::where('deal_status', 'delivered')->count();
             $grossValueRaw = (float) Deal::whereNotIn('deal_status', ['cancelled'])->sum('net_amount');
             $grossValueFormatted = $this->formatCurrencyLakhs($grossValueRaw);
-
-            // 2. Follow-Up Outcome Pipeline Stages
-            $followUpBase = LeadFollowUp::where(function ($q) {
-                $q->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
-            });
-
-            // 1) Interested / Call Back
-            $countInterested = (clone $followUpBase)->where(function ($q) {
-                $q->where('status', 'like', '%Interested%')
-                  ->orWhere('status', 'like', '%Call Back%');
-            })->count();
-
-            // 2) Quotation Requested
-            $countQuotationReq = (clone $followUpBase)->where(function ($q) {
-                $q->where('status', 'like', '%Quotation%')
-                  ->orWhere('status', 'like', '%Quote%')
-                  ->orWhere('status', 'like', '%Sent%');
-            })->count();
-
-            // 3) Negotiation / Price Discussion
-            $countNegotiation = (clone $followUpBase)->where(function ($q) {
-                $q->where('status', 'like', '%Negotiation%')
-                  ->orWhere('status', 'like', '%Price%');
-            })->count();
-
-            // 4) Not Reachable / Busy
-            $countNotReachable = (clone $followUpBase)->where(function ($q) {
-                $q->where('status', 'like', '%Not Reachable%')
-                  ->orWhere('status', 'like', '%Busy%');
-            })->count();
-
-            // 5) Lost to Competitor / Lost of Lead
-            $countLost = (clone $followUpBase)->where(function ($q) {
-                $q->where('status', 'like', '%Lost%');
-            })->count();
-
-            // 6) Deal Won / Booking
-            $countDealWon = (clone $followUpBase)->where(function ($q) {
-                $q->where('status', 'like', '%Deal%')
-                  ->orWhere('status', 'like', '%Booking%')
-                  ->orWhere('status', 'like', '%Won%')
-                  ->orWhere('status', 'like', '%Completed%');
-            })->count();
 
             // Backward compatibility pipeline counts
             $pipelineLead = Lead::where(function ($q) {
@@ -227,7 +237,7 @@ class DashboardController extends Controller
                 'data' => [
                     'date_display' => Carbon::now()->format('d M Y'),
                     'kpis' => [
-                        // Task 2: The 5 core KPI metrics
+                        //  The 5 core KPI metrics
                         'total_leads' => $totalLeads,
                         'lead_growth' => ($leadGrowth >= 0 ? "↑ {$leadGrowth}%" : "↓ " . abs($leadGrowth) . "%"),
                         'total_follow_up' => $totalFollowUp,
@@ -370,13 +380,48 @@ class DashboardController extends Controller
                 ? round((($leadsThisMonth - $leadsLastMonth) / $leadsLastMonth) * 100)
                 : ($leadsThisMonth > 0 ? 100 : 0);
 
-            // Total Follow-Up
-            $totalFollowUp = (clone $leadQuery)->where(function ($q) {
-                $q->where('status_name', 'like', '%Follow%');
+            // --- MY SALES PIPELINE (6 Follow-Up Outcome Statuses - Latest follow-up per customer only) ---
+            $latestFollowUpScopeIds = (clone $followUpQuery)
+                ->selectRaw('MAX(id) as latest_id')
+                ->groupBy(DB::raw('COALESCE(lead_id, id)'))
+                ->pluck('latest_id');
+
+            $pipelineFollowUpsScope = LeadFollowUp::whereIn('id', $latestFollowUpScopeIds);
+
+            $countInterested = (clone $pipelineFollowUpsScope)->where(function ($q) {
+                $q->where('status', 'like', '%Interested%')
+                  ->orWhere('status', 'like', '%Call Back%');
             })->count();
-            if ($totalFollowUp === 0) {
-                $totalFollowUp = (clone $followUpQuery)->distinct('lead_id')->count() ?: (clone $followUpQuery)->count();
-            }
+
+            $countQuotationReq = (clone $pipelineFollowUpsScope)->where(function ($q) {
+                $q->where('status', 'like', '%Quotation%')
+                  ->orWhere('status', 'like', '%Quote%')
+                  ->orWhere('status', 'like', '%Sent%');
+            })->count();
+
+            $countNegotiation = (clone $pipelineFollowUpsScope)->where(function ($q) {
+                $q->where('status', 'like', '%Negotiation%')
+                  ->orWhere('status', 'like', '%Price%');
+            })->count();
+
+            $countNotReachable = (clone $pipelineFollowUpsScope)->where(function ($q) {
+                $q->where('status', 'like', '%Not Reachable%')
+                  ->orWhere('status', 'like', '%Busy%');
+            })->count();
+
+            $countLost = (clone $pipelineFollowUpsScope)->where(function ($q) {
+                $q->where('status', 'like', '%Lost%');
+            })->count();
+
+            $countDealWon = (clone $pipelineFollowUpsScope)->where(function ($q) {
+                $q->where('status', 'like', '%Deal%')
+                  ->orWhere('status', 'like', '%Booking%')
+                  ->orWhere('status', 'like', '%Won%')
+                  ->orWhere('status', 'like', '%Completed%');
+            })->count();
+
+            // Total Follow-Up: only count active follow-ups matching SS 2 statuses
+            $totalFollowUp = $countInterested + $countQuotationReq + $countNegotiation + $countNotReachable;
 
             // Total Quotation
             $totalQuotation = (clone $leadQuery)->where(function ($q) {
@@ -400,39 +445,6 @@ class DashboardController extends Controller
             // Total Lost
             $totalLost = (clone $leadQuery)->where(function ($q) {
                 $q->where('status_name', 'like', '%Lost%');
-            })->count();
-
-            // --- MY SALES PIPELINE (6 Follow-Up Outcome Statuses) ---
-            $countInterested = (clone $followUpQuery)->where(function ($q) {
-                $q->where('status', 'like', '%Interested%')
-                  ->orWhere('status', 'like', '%Call Back%');
-            })->count();
-
-            $countQuotationReq = (clone $followUpQuery)->where(function ($q) {
-                $q->where('status', 'like', '%Quotation%')
-                  ->orWhere('status', 'like', '%Quote%')
-                  ->orWhere('status', 'like', '%Sent%');
-            })->count();
-
-            $countNegotiation = (clone $followUpQuery)->where(function ($q) {
-                $q->where('status', 'like', '%Negotiation%')
-                  ->orWhere('status', 'like', '%Price%');
-            })->count();
-
-            $countNotReachable = (clone $followUpQuery)->where(function ($q) {
-                $q->where('status', 'like', '%Not Reachable%')
-                  ->orWhere('status', 'like', '%Busy%');
-            })->count();
-
-            $countLost = (clone $followUpQuery)->where(function ($q) {
-                $q->where('status', 'like', '%Lost%');
-            })->count();
-
-            $countDealWon = (clone $followUpQuery)->where(function ($q) {
-                $q->where('status', 'like', '%Deal%')
-                  ->orWhere('status', 'like', '%Booking%')
-                  ->orWhere('status', 'like', '%Won%')
-                  ->orWhere('status', 'like', '%Completed%');
             })->count();
 
             // --- TODAY'S FOLLOW-UPS ---
@@ -625,13 +637,32 @@ class DashboardController extends Controller
                 ? round((($leadsThisMonth - $leadsLastMonth) / $leadsLastMonth) * 100)
                 : ($leadsThisMonth > 0 ? 100 : 0);
 
-            // 1) Total Follow-Up
-            $totalFollowUp = Lead::where(function ($q) {
-                $q->where('status_name', 'like', '%Follow%');
-            })->count();
-            if ($totalFollowUp === 0) {
-                $totalFollowUp = LeadFollowUp::distinct('lead_id')->count() ?: LeadFollowUp::count();
-            }
+            // 1) Total Follow-Up: only count active follow-ups matching SS 2 statuses
+            $latestFollowUpIdsRec = LeadFollowUp::whereNull('record_status')->orWhere('record_status', '!=', 'deleted')
+                ->selectRaw('MAX(id) as latest_id')
+                ->groupBy(DB::raw('COALESCE(lead_id, id)'))
+                ->pluck('latest_id');
+
+            $totalFollowUp = LeadFollowUp::whereIn('id', $latestFollowUpIdsRec)
+                ->where(function ($q) {
+                    $q->where('status', 'like', '%Interested%')
+                      ->orWhere('status', 'like', '%Call Back%')
+                      ->orWhere('status', 'like', '%Quotation%')
+                      ->orWhere('status', 'like', '%Quote%')
+                      ->orWhere('status', 'like', '%Sent%')
+                      ->orWhere('status', 'like', '%Negotiation%')
+                      ->orWhere('status', 'like', '%Price%')
+                      ->orWhere('status', 'like', '%Not Reachable%')
+                      ->orWhere('status', 'like', '%Busy%');
+                })
+                ->where(function ($q) {
+                    $q->where('status', 'not like', '%Deal%')
+                      ->where('status', 'not like', '%Won%')
+                      ->where('status', 'not like', '%Booking%')
+                      ->where('status', 'not like', '%Lost%')
+                      ->where('status', '!=', 'Completed');
+                })
+                ->count();
 
             // 2) Total Quotation
             $totalQuotation = Lead::where(function ($q) {
@@ -821,17 +852,191 @@ class DashboardController extends Controller
     }
 
     /**
+     * Dedicated Accountant Dashboard Statistics and Live Ledgers
+     * Scoped to Financial Overview, Collections, Receivables, and Showroom Expenses
+     */
+    public function accountantStats(Request $request)
+    {
+        try {
+            $today = Carbon::today()->toDateString();
+            $startOfMonth = Carbon::now()->startOfMonth()->toDateString();
+            $endOfMonth = Carbon::now()->endOfMonth()->toDateString();
+
+            // 1. Receivables & Total Deal Revenue
+            $dealsBase = Deal::whereNotIn('deal_status', ['cancelled']);
+            $totalDealsValue = (float) (clone $dealsBase)->sum('net_amount');
+            $totalReceivables = (float) (clone $dealsBase)->sum('balance_due');
+
+            // 2. Collections (Customer Deal Payments)
+            $paymentQuery = DealPayment::where(function ($q) {
+                $q->whereNull('status')
+                  ->orWhereNotIn('status', ['bounced', 'rejected', 'cancelled']);
+            });
+
+            $totalCollected = (float) (clone $paymentQuery)->sum('amount');
+            $todayCollection = (float) (clone $paymentQuery)
+                ->whereDate('payment_date', $today)
+                ->sum('amount');
+            $monthCollection = (float) (clone $paymentQuery)
+                ->whereBetween('payment_date', [$startOfMonth, $endOfMonth])
+                ->sum('amount');
+
+            // 3. Operational Showroom Expenses
+            $expenseQuery = Expense::where(function ($q) {
+                $q->whereNull('status')
+                  ->orWhere('status', '!=', 'rejected');
+            });
+
+            $totalExpenses = (float) (clone $expenseQuery)->sum('amount');
+            $monthExpenses = (float) (clone $expenseQuery)
+                ->whereBetween('expense_date', [$startOfMonth, $endOfMonth])
+                ->sum('amount');
+            $todayExpenses = (float) (clone $expenseQuery)
+                ->whereDate('expense_date', $today)
+                ->sum('amount');
+
+            // 4. Net Operating Cash Flow
+            $netCashFlow = $totalCollected - $totalExpenses;
+
+            // 5. Active Tokens / Installment Invoices count
+            $activeTokensCount = CustomerToken::where('status', '!=', 'Settled')->count();
+            if ($activeTokensCount === 0) {
+                $activeTokensCount = InstallmentInvoice::where('status', 'Active')->count();
+            }
+
+            // 6. Top Pending Customer Payments (Deals with highest balance_due > 0)
+            $pendingCustomers = Deal::whereNotIn('deal_status', ['cancelled'])
+                ->where('balance_due', '>', 0)
+                ->orderByDesc('balance_due')
+                ->limit(5)
+                ->get([
+                    'id', 'deal_number', 'customer_name', 'customer_phone',
+                    'brand_name', 'model_variant', 'net_amount', 'total_paid', 'balance_due', 'deal_status', 'booking_date'
+                ]);
+
+            // 7. Recent Transactions Feed (Unified chronological passbook of Collections + Expenses)
+            $recentPayments = DealPayment::with('deal:id,deal_number,customer_name')
+                ->orderByDesc('payment_date')
+                ->orderByDesc('id')
+                ->limit(6)
+                ->get()
+                ->map(function ($p) {
+                    $ts = $p->payment_date ? Carbon::parse($p->payment_date)->timestamp : Carbon::parse($p->created_at)->timestamp;
+                    return [
+                        'id' => 'PAY-' . $p->id,
+                        'type' => 'income',
+                        'date' => $p->payment_date ? Carbon::parse($p->payment_date)->format('d M, Y') : Carbon::parse($p->created_at)->format('d M, Y'),
+                        'raw_date' => $ts,
+                        'title' => $p->deal->customer_name ?? 'Customer Payment',
+                        'party_type' => 'Customer',
+                        'mode' => strtoupper(str_replace('_', ' ', $p->payment_mode ?? 'Bank')),
+                        'ref' => $p->receipt_number ?? ($p->transaction_reference ?? 'REC-' . $p->id),
+                        'amount' => (float) $p->amount,
+                    ];
+                });
+
+            $recentExpenses = Expense::with('category:id,name')
+                ->where(function ($q) {
+                    $q->whereNull('status')->orWhere('status', '!=', 'rejected');
+                })
+                ->orderByDesc('expense_date')
+                ->orderByDesc('id')
+                ->limit(6)
+                ->get()
+                ->map(function ($e) {
+                    $ts = $e->expense_date ? Carbon::parse($e->expense_date)->timestamp : Carbon::parse($e->created_at)->timestamp;
+                    return [
+                        'id' => 'EXP-' . $e->id,
+                        'type' => 'expense',
+                        'date' => $e->expense_date ? Carbon::parse($e->expense_date)->format('d M, Y') : Carbon::parse($e->created_at)->format('d M, Y'),
+                        'raw_date' => $ts,
+                        'title' => $e->title ?? 'Expense',
+                        'party_type' => $e->category->name ?? 'Showroom Expense',
+                        'mode' => strtoupper(str_replace('_', ' ', $e->payment_method ?? 'Cash')),
+                        'ref' => $e->reference_no ?? 'EXP-' . $e->id,
+                        'amount' => (float) $e->amount,
+                    ];
+                });
+
+            $recentTransactions = $recentPayments->concat($recentExpenses)
+                ->sortByDesc('raw_date')
+                ->values()
+                ->take(8);
+
+            // 8. Expense Breakdown by Category
+            $expenseBreakdown = Expense::where(function ($q) {
+                    $q->whereNull('status')->orWhere('status', '!=', 'rejected');
+                })
+                ->selectRaw('category_id, sum(amount) as total')
+                ->groupBy('category_id')
+                ->with('category:id,name')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'category_id' => $item->category_id,
+                        'category_name' => $item->category->name ?? 'General & Admin',
+                        'total' => (float) $item->total,
+                    ];
+                });
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Accountant dashboard statistics retrieved successfully',
+                'data' => [
+                    'date_display' => Carbon::now()->format('d M Y'),
+                    'kpis' => [
+                        'total_receivables' => $totalReceivables,
+                        'total_receivables_formatted' => $this->formatCurrencyLakhs($totalReceivables),
+                        'total_collected' => $totalCollected,
+                        'total_collected_formatted' => $this->formatCurrencyLakhs($totalCollected),
+                        'today_collection' => $todayCollection,
+                        'today_collection_formatted' => $this->formatCurrencyLakhs($todayCollection),
+                        'month_collection' => $monthCollection,
+                        'month_collection_formatted' => $this->formatCurrencyLakhs($monthCollection),
+                        'total_expenses' => $totalExpenses,
+                        'total_expenses_formatted' => $this->formatCurrencyLakhs($totalExpenses),
+                        'month_expenses' => $monthExpenses,
+                        'month_expenses_formatted' => $this->formatCurrencyLakhs($monthExpenses),
+                        'today_expenses' => $todayExpenses,
+                        'today_expenses_formatted' => $this->formatCurrencyLakhs($todayExpenses),
+                        'net_cash_flow' => $netCashFlow,
+                        'net_cash_flow_formatted' => $this->formatCurrencyLakhs($netCashFlow),
+                        'total_deals_value' => $totalDealsValue,
+                        'total_deals_value_formatted' => $this->formatCurrencyLakhs($totalDealsValue),
+                        'active_tokens_count' => $activeTokensCount,
+                    ],
+                    'pending_customers' => $pendingCustomers,
+                    'recent_transactions' => $recentTransactions,
+                    'expense_breakdown' => $expenseBreakdown,
+                ]
+            ], 200);
+
+        } catch (\Throwable $e) {
+            Log::error('DashboardController@accountantStats error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while fetching accountant dashboard statistics.',
+            ], 500);
+        }
+    }
+
+    /**
      * Helper to format currency into Indian Rupees Lakhs / Crores
      */
     private function formatCurrencyLakhs($amount)
     {
         $amount = (float) $amount;
-        if ($amount >= 10000000) {
-            return '₹' . number_format($amount / 10000000, 2) . ' Cr';
-        } elseif ($amount >= 100000) {
-            return '₹' . number_format($amount / 100000, 1) . 'L';
+        $isNegative = $amount < 0;
+        $abs = abs($amount);
+
+        if ($abs >= 10000000) {
+            $formatted = '₹' . number_format($abs / 10000000, 2) . ' Cr';
+        } elseif ($abs >= 100000) {
+            $formatted = '₹' . number_format($abs / 100000, 1) . 'L';
         } else {
-            return '₹' . number_format($amount, 0);
+            $formatted = '₹' . number_format($abs, 0);
         }
+
+        return $isNegative ? '-' . $formatted : $formatted;
     }
 }

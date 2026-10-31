@@ -354,6 +354,15 @@ class VehicleVariantController extends Controller
                 ], 404);
             }
 
+            // Check if variant is in use in leads
+            $leadsCount = \App\Models\Lead::where('variant_id', $id)->count();
+            if ($leadsCount > 0) {
+                return response()->json([
+                    'status' => false,
+                    'message' => "Cannot delete Variant '{$variant->name}' as it is currently associated with {$leadsCount} lead(s). Please reassign or remove the leads first.",
+                ], 422);
+            }
+
             $variant->delete();
 
             return response()->json([

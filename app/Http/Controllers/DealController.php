@@ -541,22 +541,25 @@ class DealController extends Controller
                     ]);
                 }
 
-                // Update Lead status to "Deal & Booking"
-                $lead->status_name = 'Deal & Booking';
+                // Update Lead status to "Deal Won"
+                $dealWonStatus = \App\Models\LeadStatus::where('name', 'Deal Won')->first();
+                $lead->status_name = 'Deal Won';
+                if ($dealWonStatus) {
+                    $lead->status_id = $dealWonStatus->id;
+                }
                 $lead->save();
 
-                // Log Follow-up history entry
+                // Log Follow-up history entry with "Deal Won / Booking" outcome
                 LeadFollowUp::create([
                     'lead_id' => $lead->id,
                     'user_id' => $user?->id ?? $lead->assigned_to ?? \App\Models\User::first()?->id ?? 1,
                     'user_name' => $user?->name ?? 'System',
                     'follow_up_date' => now()->format('Y-m-d'),
                     'follow_up_time' => now()->format('H:i:s'),
-                    'type' => 'Note',
-                    'call_outcome' => 'Deal Won',
+                    'type' => 'Deal Converted',
                     'notes' => "Lead converted into Deal #{$deal->deal_number}. Total Deal Value: " . number_format($netAmount, 2),
                     'next_follow_up_date' => null,
-                    'status' => 'Completed',
+                    'status' => 'Deal Won / Booking',
                 ]);
 
                 // If Quotation exists, mark it as accepted

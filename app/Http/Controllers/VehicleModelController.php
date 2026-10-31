@@ -221,6 +221,24 @@ class VehicleModelController extends Controller
                 ], 404);
             }
 
+            // Check if model is in use in leads
+            $leadsCount = \App\Models\Lead::where('model_id', $id)->count();
+            if ($leadsCount > 0) {
+                return response()->json([
+                    'status' => false,
+                    'message' => "Cannot delete Model '{$model->name}' as it is currently associated with {$leadsCount} lead(s). Please reassign or remove the leads first.",
+                ], 422);
+            }
+
+            // Check if model is in use in variants
+            $variantsCount = \App\Models\VehicleVariant::where('model_id', $id)->count();
+            if ($variantsCount > 0) {
+                return response()->json([
+                    'status' => false,
+                    'message' => "Cannot delete Model '{$model->name}' as it has {$variantsCount} vehicle variant(s) linked to it. Please remove or reassign the variants first.",
+                ], 422);
+            }
+
             $model->delete();
 
             return response()->json([

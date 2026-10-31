@@ -642,6 +642,11 @@ class LogActivityMiddleware
                 $title = $data['title'] ?? $data['name'] ?? $request->input('title');
                 $amount = $data['amount'] ?? $request->input('amount');
                 $category = $data['category'] ?? null;
+                if (is_array($category)) {
+                    $category = $category['name'] ?? null;
+                } elseif (is_object($category)) {
+                    $category = $category->name ?? null;
+                }
 
                 if (!$category && ($catId = $data['category_id'] ?? $request->input('category_id'))) {
                     try {
@@ -650,8 +655,8 @@ class LogActivityMiddleware
                 }
 
                 $meta = [];
-                if (!empty($amount)) $meta[] = "Amount: ₹" . number_format((float) $amount);
-                if (!empty($category)) $meta[] = "Category: {$category}";
+                if (!empty($amount) && is_numeric($amount)) $meta[] = "Amount: ₹" . number_format((float) $amount);
+                if (!empty($category) && is_string($category)) $meta[] = "Category: {$category}";
 
                 if (!empty($title)) {
                     return !empty($meta) ? "{$title} (" . implode(', ', $meta) . ")" : $title;

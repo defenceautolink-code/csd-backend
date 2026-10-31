@@ -258,6 +258,33 @@ class BrandController extends Controller
                 ], 404);
             }
 
+            // Check if brand is in use in leads
+            $leadsCount = \App\Models\Lead::where('brand_id', $id)->count();
+            if ($leadsCount > 0) {
+                return response()->json([
+                    'status' => false,
+                    'message' => "Cannot delete Brand '{$brand->name}' as it is currently associated with {$leadsCount} lead(s). Please reassign or remove the leads first.",
+                ], 422);
+            }
+
+            // Check if brand is in use in models
+            $modelsCount = \App\Models\VehicleModel::where('brand_id', $id)->count();
+            if ($modelsCount > 0) {
+                return response()->json([
+                    'status' => false,
+                    'message' => "Cannot delete Brand '{$brand->name}' as it has {$modelsCount} vehicle model(s) linked to it. Please remove or reassign the models first.",
+                ], 422);
+            }
+
+            // Check if brand is in use in deals
+            $dealsCount = \App\Models\Deal::where('brand_id', $id)->count();
+            if ($dealsCount > 0) {
+                return response()->json([
+                    'status' => false,
+                    'message' => "Cannot delete Brand '{$brand->name}' as it is linked to {$dealsCount} active deal(s).",
+                ], 422);
+            }
+
             if ($brand->logo && file_exists(public_path($brand->logo))) {
                 @unlink(public_path($brand->logo));
             }

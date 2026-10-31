@@ -58,6 +58,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('dashboard/stats', [DashboardController::class, 'stats']);
     Route::get('dashboard/sales-executive-stats', [DashboardController::class, 'salesExecutiveStats']);
     Route::get('dashboard/receptionist-stats', [DashboardController::class, 'receptionistStats']);
+    Route::get('dashboard/accountant-stats', [DashboardController::class, 'accountantStats']);
+
+    // Accountant Dedicated APIs
+    Route::prefix('accountant')->group(function () {
+        Route::get('/dashboard/stats', [DashboardController::class, 'accountantStats']);
+    });
 
     // Receptionist Dedicated APIs
     Route::prefix('receptionist')->group(function () {

@@ -411,7 +411,7 @@ class QuotationController extends Controller
                         'follow_up_time' => now()->format('h:i A'),
                         'type' => 'Quotation Sent',
                         'notes' => "Quotation Sent: Official Quotation #{$quotationNumber} generated for {$validated['subject']} (Grand Total: ₹" . number_format($grandTotal, 2) . ").",
-                        'status' => 'Completed',
+                        'status' => 'Quotation Requested',
                     ]);
 
                     $quotationSentStatus = LeadStatus::where('name', 'Quotation Sent')->first();
@@ -705,7 +705,7 @@ class QuotationController extends Controller
                         'follow_up_time' => now()->format('h:i A'),
                         'type' => 'Email',
                         'notes' => "Quotation Sent: Official Quotation #{$quotation->quotation_number} emailed to {$recipientEmail} for {$quotation->subject} (Grand Total: ₹" . number_format($quotation->grand_total, 2) . ").",
-                        'status' => 'Completed',
+                        'status' => 'Quotation Requested',
                     ]);
 
                     $quotationSentStatus = LeadStatus::where('name', 'Quotation Sent')->first();

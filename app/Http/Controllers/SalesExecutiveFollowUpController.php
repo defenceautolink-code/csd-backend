@@ -32,6 +32,8 @@ class SalesExecutiveFollowUpController extends Controller
 
             $lead = $query->first();
 
+        
+            
             if (!$lead) {
                 return response()->json([
                     'status' => false,
@@ -136,7 +138,7 @@ class SalesExecutiveFollowUpController extends Controller
                 'notes' => $request->notes,
                 'next_follow_up_date' => $request->filled('next_follow_up_date') ? date('Y-m-d', strtotime($request->next_follow_up_date)) : null,
                 'next_follow_up_time' => $request->next_follow_up_time,
-                'status' => ucfirst(strtolower($request->status)),
+                'status' => $request->status ?: 'Interested / Call Back',
                 'is_discount_requested' => $isDiscountRequested,
                 'discount_amount' => $isDiscountRequested ? $discountAmount : null,
                 'proposed_price' => $isDiscountRequested ? $proposedPrice : null,
