@@ -35,6 +35,12 @@ class DealController extends Controller
                 },
             ]);
 
+            // Trash vs Active view
+            $viewMode = strtolower((string) ($request->input('view') ?? $request->input('record_view') ?? 'active'));
+            if ($viewMode === 'trash' || $request->boolean('trash')) {
+                $query->onlyTrashed();
+            }
+
             // Sales Executive role scoping
             if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
                 $query->where(function ($q) use ($user) {
@@ -75,6 +81,16 @@ class DealController extends Controller
                     $query->whereIn('payment_status', array_map('trim', explode(',', $paymentStatus)));
                 } else {
                     $query->where('payment_status', trim($paymentStatus));
+                }
+            }
+
+            // Filter by Insurance: e.g. has_insurance = 'No' or 'Yes' (Task 8)
+            if ($request->filled('has_insurance') || $request->filled('insurance')) {
+                $insVal = strtolower(trim($request->input('has_insurance') ?? $request->input('insurance')));
+                if ($insVal === 'no' || $insVal === '0' || $insVal === 'false') {
+                    $query->whereDoesntHave('insurances');
+                } elseif ($insVal === 'yes' || $insVal === '1' || $insVal === 'true') {
+                    $query->whereHas('insurances');
                 }
             }
 
@@ -324,6 +340,9 @@ class DealController extends Controller
 
                 $totalAmount = (float) $validated['total_amount'];
                 $discountAmount = (float) ($validated['discount_amount'] ?? 0);
+                if ($discountAmount <= 0 && (float) ($lead->approved_discount ?? 0) > 0) {
+                    $discountAmount = (float) $lead->approved_discount;
+                }
                 $netAmount = max(0.0, $totalAmount - $discountAmount);
 
                 // Resolve Brand ID safely (validate against brands table to prevent 1452 foreign key error)
@@ -881,13 +900,61 @@ class DealController extends Controller
 
             return response()->json([
                 'status' => true,
-                'message' => "Deal #{$deal->deal_number} deleted successfully",
+                'message' => "Deal #{$deal->deal_number} moved to trash successfully",
             ]);
         } catch (\Throwable $e) {
             Log::error('DealController@destroy error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred while deleting deal.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore a soft-deleted deal from trash
+     */
+    public function restore($id)
+    {
+        try {
+            $deal = Deal::onlyTrashed()->findOrFail($id);
+            $deal->restore();
+
+            return response()->json([
+                'status' => true,
+                'message' => "Deal #{$deal->deal_number} restored successfully",
+                'data' => $deal,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('DealController@restore error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while restoring deal.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Permanently delete a deal from database
+     */
+    public function forceDelete($id)
+    {
+        try {
+            $deal = Deal::withTrashed()->findOrFail($id);
+            
+            // Delete associated payments
+            $deal->payments()->delete();
+            $deal->forceDelete();
+
+            return response()->json([
+                'status' => true,
+                'message' => "Deal #{$deal->deal_number} permanently deleted",
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('DealController@forceDelete error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while permanently deleting deal.',
             ], 500);
         }
     }
@@ -949,6 +1016,105 @@ class DealController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred while fetching deal statistics.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Add / Attach insurance policy to an existing deal (Task 8)
+     */
+    public function addInsurance(Request $request, $id)
+    {
+        try {
+            $deal = Deal::findOrFail($id);
+
+            $validated = $request->validate([
+                'insurance_company' => 'required|string|max:150',
+                'policy_number' => 'required|string|max:100',
+                'insurance_type' => 'nullable|string|max:50',
+                'policy_start_date' => 'required|date',
+                'policy_expiry_date' => 'nullable|date',
+                'premium_amount' => 'required|numeric|min:0',
+                'reminder_days_before' => 'nullable|integer|min:0',
+                'reminder_date' => 'nullable|date',
+                'vehicle_number' => 'nullable|string|max:100',
+                'notes' => 'nullable|string',
+            ]);
+
+            $delivDate = $validated['policy_start_date'];
+            $expiryDate = $validated['policy_expiry_date'] ?? \Illuminate\Support\Carbon::parse($delivDate)->addDays(365)->format('Y-m-d');
+            $reminderDays = (int) ($validated['reminder_days_before'] ?? 15);
+            $reminderDate = $validated['reminder_date'] ?? \Illuminate\Support\Carbon::parse($expiryDate)->subDays($reminderDays)->format('Y-m-d');
+
+            $vehicleNumber = $validated['vehicle_number'] ?? $deal->registration_number ?? $deal->vin_chassis_number ?? 'PENDING';
+
+            $insurance = Insurance::create([
+                'deal_id' => $deal->id,
+                'lead_id' => $deal->lead_id,
+                'customer_id' => $deal->lead_id,
+                'customer_name' => $deal->customer_name,
+                'customer_phone' => $deal->customer_phone,
+                'customer_email' => $deal->customer_email,
+                'customer_address' => $deal->customer_city ?? $deal->customer_address,
+                'vehicle_name' => $deal->model_variant,
+                'vehicle_number' => $vehicleNumber,
+                'registration_number' => $vehicleNumber,
+                'vin_chassis_number' => $deal->vin_chassis_number,
+                'engine_number' => $deal->engine_number,
+                'insurance_company' => $validated['insurance_company'],
+                'policy_number' => $validated['policy_number'],
+                'insurance_type' => $validated['insurance_type'] ?? 'Comprehensive Zero-Dep (1+3 Yrs)',
+                'policy_start_date' => $delivDate,
+                'policy_expiry_date' => $expiryDate,
+                'delivery_date' => $delivDate,
+                'start_date' => $delivDate,
+                'expiry_date' => $expiryDate,
+                'next_insurance_date' => $expiryDate,
+                'premium_amount' => (float) $validated['premium_amount'],
+                'reminder_days_before' => $reminderDays,
+                'reminder_date' => $reminderDate,
+                'renewal_status' => 'Pending',
+                'status' => 'active',
+                'notes' => $validated['notes'] ?? "Insurance policy added for Deal #{$deal->deal_number}",
+            ]);
+
+            // Also create renewal history record
+            $insurance->renewalHistories()->create([
+                'deal_id' => $deal->id,
+                'policy_number' => $validated['policy_number'],
+                'insurance_company' => $validated['insurance_company'],
+                'insurance_type' => $validated['insurance_type'] ?? 'Comprehensive Zero-Dep (1+3 Yrs)',
+                'policy_start_date' => $delivDate,
+                'policy_expiry_date' => $expiryDate,
+                'premium_amount' => (float) $validated['premium_amount'],
+                'reminder_days_before' => $reminderDays,
+                'reminder_date' => $reminderDate,
+                'renewal_status' => 'Active',
+                'renewed_at' => now(),
+                'notes' => $validated['notes'] ?? "Insurance policy added for Deal #{$deal->deal_number}",
+            ]);
+
+            $deal->update([
+                'has_insurance' => 'Yes',
+                'insurance' => 'Yes',
+                'insurance_amount' => (float) $validated['premium_amount'],
+                'insurance_company' => $validated['insurance_company'],
+                'policy_number' => $validated['policy_number'],
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Insurance policy added to Deal successfully!',
+                'data' => [
+                    'deal' => $deal->fresh(['insurances']),
+                    'insurance' => $insurance,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('DealController@addInsurance error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'Failed to attach insurance to deal.',
             ], 500);
         }
     }

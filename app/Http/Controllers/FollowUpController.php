@@ -84,7 +84,7 @@ class FollowUpController extends Controller
 
             // Filter by Outcome Status for non-grouped queries (history modal / raw list)
             if (!$shouldGroup) {
-                if ($request->filled('outcome') && $request->outcome !== 'all') {
+                if ($request->filled('outcome') && $request->outcome !== 'all' && $request->outcome !== '') {
                     $outcomeVal = $request->outcome;
                     $query->where(function ($q) use ($outcomeVal) {
                         if (stripos($outcomeVal, 'Deal') !== false || stripos($outcomeVal, 'Won') !== false || stripos($outcomeVal, 'Booking') !== false) {
@@ -92,10 +92,12 @@ class FollowUpController extends Controller
                               ->orWhere('status', 'like', '%Won%')
                               ->orWhere('status', 'like', '%Booking%')
                               ->orWhere('status', 'Completed');
+                        } elseif (stripos($outcomeVal, 'Quotation Sent') !== false || stripos($outcomeVal, 'Quotation Send') !== false) {
+                            $q->where('status', 'like', '%Quotation Sent%')
+                              ->orWhere('status', 'like', '%Quotation Send%');
                         } elseif (stripos($outcomeVal, 'Quotation') !== false || stripos($outcomeVal, 'Quote') !== false) {
-                            $q->where('status', 'like', '%Quotation%')
-                              ->orWhere('status', 'like', '%Quote%')
-                              ->orWhere('status', 'like', '%Sent%');
+                            $q->where('status', 'like', '%Quotation Requested%')
+                              ->orWhere('status', 'like', '%Quote%');
                         } elseif (stripos($outcomeVal, 'Interested') !== false || stripos($outcomeVal, 'Call Back') !== false) {
                             $q->where('status', 'like', '%Interested%')
                               ->orWhere('status', 'like', '%Call Back%');
@@ -147,46 +149,59 @@ class FollowUpController extends Controller
                     ->groupBy($groupExpr)
                     ->pluck('latest_id');
 
-                $activeKpiIds = LeadFollowUp::whereIn('id', $allGroupedLatest)
-                    ->where(function ($q) {
-                        $q->where('status', 'like', '%Interested%')
-                          ->orWhere('status', 'like', '%Call Back%')
-                          ->orWhere('status', 'like', '%Quotation%')
-                          ->orWhere('status', 'like', '%Quote%')
-                          ->orWhere('status', 'like', '%Sent%')
-                          ->orWhere('status', 'like', '%Negotiation%')
-                          ->orWhere('status', 'like', '%Price%')
-                          ->orWhere('status', 'like', '%Not Reachable%')
-                          ->orWhere('status', 'like', '%Busy%');
-                    })
-                    ->where(function ($q) {
-                        $q->where('status', 'not like', '%Deal%')
-                          ->where('status', 'not like', '%Won%')
-                          ->where('status', 'not like', '%Booking%')
-                          ->where('status', 'not like', '%Lost%')
-                          ->where('status', '!=', 'Completed');
-                    })
-                    ->pluck('id');
-
-                $totalCount = count($activeKpiIds);
-
                 $latestItemsQuery = LeadFollowUp::query();
                 if ($isTrashView) {
                     $latestItemsQuery->withTrashed();
                 }
-                $latestItems = $activeKpiIds->isNotEmpty()
-                    ? $latestItemsQuery->whereIn('id', $activeKpiIds)->get(['id', 'next_follow_up_date', 'status'])
+                $allLatestItems = $allGroupedLatest->isNotEmpty()
+                    ? $latestItemsQuery->whereIn('id', $allGroupedLatest)->get(['id', 'next_follow_up_date', 'status', 'notes'])
                     : collect();
 
-                $overdueIds = $latestItems->filter(function ($item) use ($today) {
+                $totalCount = $allLatestItems->count();
+
+                $outcomeCounts = [
+                    'total' => $totalCount,
+                    'interested' => 0,
+                    'quotation_requested' => 0,
+                    'quotation_sent' => 0,
+                    'negotiation' => 0,
+                    'not_reachable' => 0,
+                    'deal_won' => 0,
+                    'lost' => 0,
+                ];
+
+                foreach ($allLatestItems as $item) {
+                    if ($item->status === 'Quotation Requested' && stripos($item->notes ?? '', 'Quotation Sent') !== false) {
+                        $item->status = 'Quotation Sent';
+                        LeadFollowUp::where('id', $item->id)->update(['status' => 'Quotation Sent']);
+                    }
+                    $st = $item->status ?? '';
+                    if (stripos($st, 'Deal') !== false || stripos($st, 'Won') !== false || stripos($st, 'Booking') !== false) {
+                        $outcomeCounts['deal_won']++;
+                    } elseif (stripos($st, 'Quotation Sent') !== false || stripos($st, 'Quotation Send') !== false) {
+                        $outcomeCounts['quotation_sent']++;
+                    } elseif (stripos($st, 'Quotation') !== false || stripos($st, 'Quote') !== false) {
+                        $outcomeCounts['quotation_requested']++;
+                    } elseif (stripos($st, 'Interested') !== false || stripos($st, 'Call Back') !== false) {
+                        $outcomeCounts['interested']++;
+                    } elseif (stripos($st, 'Negotiation') !== false || stripos($st, 'Price') !== false) {
+                        $outcomeCounts['negotiation']++;
+                    } elseif (stripos($st, 'Reachable') !== false || stripos($st, 'Busy') !== false) {
+                        $outcomeCounts['not_reachable']++;
+                    } elseif (stripos($st, 'Lost') !== false) {
+                        $outcomeCounts['lost']++;
+                    }
+                }
+
+                $overdueIds = $allLatestItems->filter(function ($item) use ($today) {
                     return !empty($item->next_follow_up_date) && $item->next_follow_up_date < $today;
                 })->pluck('id')->all();
 
-                $dueTodayIds = $latestItems->filter(function ($item) use ($today) {
+                $dueTodayIds = $allLatestItems->filter(function ($item) use ($today) {
                     return !empty($item->next_follow_up_date) && $item->next_follow_up_date === $today;
                 })->pluck('id')->all();
 
-                $upcomingIds = $latestItems->filter(function ($item) use ($today) {
+                $upcomingIds = $allLatestItems->filter(function ($item) use ($today) {
                     $next7Days = Carbon::today()->addDays(7)->toDateString();
                     return !empty($item->next_follow_up_date) &&
                         $item->next_follow_up_date > $today &&
@@ -203,6 +218,17 @@ class FollowUpController extends Controller
                 $upcomingCount = (clone $kpiBaseQuery)->whereDate('next_follow_up_date', '>', $today)
                     ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString())->count();
                 $totalCount = (clone $kpiBaseQuery)->count();
+
+                $outcomeCounts = [
+                    'total' => $totalCount,
+                    'interested' => 0,
+                    'quotation_requested' => 0,
+                    'quotation_sent' => 0,
+                    'negotiation' => 0,
+                    'not_reachable' => 0,
+                    'deal_won' => 0,
+                    'lost' => 0,
+                ];
             }
 
             // Search filter
@@ -266,16 +292,23 @@ class FollowUpController extends Controller
 
                 $latestIds = array_keys($groupedStats);
 
-                // Filter by active SS 2 outcomes (Interested, Quotation Requested, Negotiation, Not Reachable)
+                // Filter by Outcome Status
                 if (!$isTrashView && !empty($latestIds)) {
-                    if ($request->filled('outcome') && $request->outcome !== 'all') {
+                    if ($request->filled('outcome') && $request->outcome !== 'all' && $request->outcome !== '') {
                         $outcomeVal = $request->outcome;
                         $matchingLatestIds = LeadFollowUp::whereIn('id', $latestIds)
                             ->where(function ($q) use ($outcomeVal) {
-                                if (stripos($outcomeVal, 'Quotation') !== false || stripos($outcomeVal, 'Quote') !== false) {
-                                    $q->where('status', 'like', '%Quotation%')
-                                      ->orWhere('status', 'like', '%Quote%')
-                                      ->orWhere('status', 'like', '%Sent%');
+                                if (stripos($outcomeVal, 'Deal') !== false || stripos($outcomeVal, 'Won') !== false || stripos($outcomeVal, 'Booking') !== false) {
+                                    $q->where('status', 'like', '%Deal%')
+                                      ->orWhere('status', 'like', '%Won%')
+                                      ->orWhere('status', 'like', '%Booking%')
+                                      ->orWhere('status', 'Completed');
+                                } elseif (stripos($outcomeVal, 'Quotation Sent') !== false || stripos($outcomeVal, 'Quotation Send') !== false) {
+                                    $q->where('status', 'like', '%Quotation Sent%')
+                                      ->orWhere('status', 'like', '%Quotation Send%');
+                                } elseif (stripos($outcomeVal, 'Quotation') !== false || stripos($outcomeVal, 'Quote') !== false) {
+                                    $q->where('status', 'like', '%Quotation Requested%')
+                                      ->orWhere('status', 'like', '%Quote%');
                                 } elseif (stripos($outcomeVal, 'Interested') !== false || stripos($outcomeVal, 'Call Back') !== false) {
                                     $q->where('status', 'like', '%Interested%')
                                       ->orWhere('status', 'like', '%Call Back%');
@@ -285,34 +318,11 @@ class FollowUpController extends Controller
                                 } elseif (stripos($outcomeVal, 'Reachable') !== false || stripos($outcomeVal, 'Busy') !== false) {
                                     $q->where('status', 'like', '%Not Reachable%')
                                       ->orWhere('status', 'like', '%Busy%');
+                                } elseif (stripos($outcomeVal, 'Lost') !== false) {
+                                    $q->where('status', 'like', '%Lost%');
                                 } else {
                                     $q->where('status', $outcomeVal);
                                 }
-                            })
-                            ->pluck('id')
-                            ->toArray();
-
-                        $latestIds = array_values(array_intersect($latestIds, $matchingLatestIds));
-                    } else {
-                        // Default All Outcomes in Follow-Up Hub: Only show records matching SS 2 statuses
-                        $matchingLatestIds = LeadFollowUp::whereIn('id', $latestIds)
-                            ->where(function ($q) {
-                                $q->where('status', 'like', '%Interested%')
-                                  ->orWhere('status', 'like', '%Call Back%')
-                                  ->orWhere('status', 'like', '%Quotation%')
-                                  ->orWhere('status', 'like', '%Quote%')
-                                  ->orWhere('status', 'like', '%Sent%')
-                                  ->orWhere('status', 'like', '%Negotiation%')
-                                  ->orWhere('status', 'like', '%Price%')
-                                  ->orWhere('status', 'like', '%Not Reachable%')
-                                  ->orWhere('status', 'like', '%Busy%');
-                            })
-                            ->where(function ($q) {
-                                $q->where('status', 'not like', '%Deal%')
-                                  ->where('status', 'not like', '%Won%')
-                                  ->where('status', 'not like', '%Booking%')
-                                  ->where('status', 'not like', '%Lost%')
-                                  ->where('status', '!=', 'Completed');
                             })
                             ->pluck('id')
                             ->toArray();
@@ -352,6 +362,10 @@ class FollowUpController extends Controller
                     foreach ($pageIds as $pid) {
                         if (isset($items[$pid])) {
                             $record = $items[$pid];
+                            if ($record->status === 'Quotation Requested' && stripos($record->notes ?? '', 'Quotation Sent') !== false) {
+                                $record->status = 'Quotation Sent';
+                                LeadFollowUp::where('id', $record->id)->update(['status' => 'Quotation Sent']);
+                            }
                             $record->follow_ups_count = (int) ($groupedStats[$pid] ?? 1);
                             $records[] = $record;
                         }
@@ -365,12 +379,12 @@ class FollowUpController extends Controller
                 return response()->json([
                     'status' => true,
                     'message' => 'Follow-ups retrieved successfully',
-                    'kpis' => [
+                    'kpis' => array_merge($outcomeCounts, [
                         'overdue' => $overdueCount,
                         'due_today' => $dueTodayCount,
                         'upcoming' => $upcomingCount,
                         'total' => $totalCount,
-                    ],
+                    ]),
                     'data' => $records,
                     'pagination' => [
                         'current_page' => $page,
@@ -391,12 +405,12 @@ class FollowUpController extends Controller
                 return response()->json([
                     'status' => true,
                     'message' => 'Follow-ups retrieved successfully',
-                    'kpis' => [
+                    'kpis' => array_merge($outcomeCounts, [
                         'overdue' => $overdueCount,
                         'due_today' => $dueTodayCount,
                         'upcoming' => $upcomingCount,
                         'total' => $totalCount,
-                    ],
+                    ]),
                     'data' => $paginated->items(),
                     'pagination' => [
                         'current_page' => $paginated->currentPage(),
@@ -414,12 +428,12 @@ class FollowUpController extends Controller
             return response()->json([
                 'status' => true,
                 'message' => 'Follow-ups retrieved successfully',
-                'kpis' => [
+                'kpis' => array_merge($outcomeCounts, [
                     'overdue' => $overdueCount,
                     'due_today' => $dueTodayCount,
                     'upcoming' => $upcomingCount,
                     'total' => $totalCount,
-                ],
+                ]),
                 'data' => $followUps,
                 'pagination' => [
                     'current_page' => 1,
@@ -510,6 +524,11 @@ class FollowUpController extends Controller
             }
 
             $outcomeStr = trim($request->status ?? $request->outcome ?? 'Interested / Call Back');
+            if ($outcomeStr === 'Deal Won / Booking') {
+                $outcomeStr = 'Deal Won';
+            } elseif ($outcomeStr === 'Sent' || stripos($outcomeStr, 'Quotation Sent') !== false || stripos($outcomeStr, 'Quotation Send') !== false) {
+                $outcomeStr = 'Quotation Sent';
+            }
 
             $followUp = LeadFollowUp::create([
                 'lead_id' => $lead->id,
@@ -550,6 +569,8 @@ class FollowUpController extends Controller
                         $targetLeadStatus = 'Deal & Booking';
                     } elseif (stripos($outcomeStr, 'Lost') !== false) {
                         $targetLeadStatus = 'Lost';
+                    } elseif (stripos($outcomeStr, 'Quotation Sent') !== false || stripos($outcomeStr, 'Quotation Send') !== false) {
+                        $targetLeadStatus = 'Quotation Sent';
                     } else {
                         $targetLeadStatus = $request->lead_status_name ?: 'Follow-up';
                     }
@@ -675,7 +696,10 @@ class FollowUpController extends Controller
             if ($request->has('notes')) $updateData['notes'] = $request->notes;
             if ($request->has('next_follow_up_date')) $updateData['next_follow_up_date'] = $request->filled('next_follow_up_date') ? date('Y-m-d', strtotime($request->next_follow_up_date)) : null;
             if ($request->has('next_follow_up_time')) $updateData['next_follow_up_time'] = $request->next_follow_up_time;
-            if ($request->has('status')) $updateData['status'] = ucfirst(strtolower($request->status));
+            if ($request->has('status')) {
+                $stVal = trim($request->status);
+                $updateData['status'] = ($stVal === 'Deal Won / Booking') ? 'Deal Won' : $stVal;
+            }
 
             $followUp->update($updateData);
 
@@ -824,43 +848,70 @@ class FollowUpController extends Controller
                 ->groupBy($groupExpr)
                 ->pluck('latest_id');
 
-            // Active follow-ups matching only SS 2 statuses:
-            // 1) Interested / Call Back, 2) Quotation Requested, 3) Negotiation, 4) Not Reachable
-            $activeFollowUpsQuery = LeadFollowUp::whereIn('id', $latestFollowUpIds)
-                ->where(function ($q) {
-                    $q->where('status', 'like', '%Interested%')
-                      ->orWhere('status', 'like', '%Call Back%')
-                      ->orWhere('status', 'like', '%Quotation%')
-                      ->orWhere('status', 'like', '%Quote%')
-                      ->orWhere('status', 'like', '%Sent%')
-                      ->orWhere('status', 'like', '%Negotiation%')
-                      ->orWhere('status', 'like', '%Price%')
-                      ->orWhere('status', 'like', '%Not Reachable%')
-                      ->orWhere('status', 'like', '%Busy%');
-                })
-                ->where(function ($q) {
-                    $q->where('status', 'not like', '%Deal%')
-                      ->where('status', 'not like', '%Won%')
-                      ->where('status', 'not like', '%Booking%')
-                      ->where('status', 'not like', '%Lost%')
-                      ->where('status', '!=', 'Completed');
-                });
+            $allLatestItems = $latestFollowUpIds->isNotEmpty()
+                ? LeadFollowUp::whereIn('id', $latestFollowUpIds)->get(['id', 'status', 'notes', 'next_follow_up_date'])
+                : collect();
 
-            $totalCount = (clone $activeFollowUpsQuery)->count();
-            $overdueCount = (clone $activeFollowUpsQuery)->whereDate('next_follow_up_date', '<', $today)->count();
-            $dueTodayCount = (clone $activeFollowUpsQuery)->whereDate('next_follow_up_date', $today)->count();
-            $upcomingCount = (clone $activeFollowUpsQuery)->whereDate('next_follow_up_date', '>', $today)
-                ->whereDate('next_follow_up_date', '<=', Carbon::today()->addDays(7)->toDateString())->count();
+            $totalCount = $allLatestItems->count();
+
+            $outcomeCounts = [
+                'total' => $totalCount,
+                'interested' => 0,
+                'quotation_requested' => 0,
+                'quotation_sent' => 0,
+                'negotiation' => 0,
+                'not_reachable' => 0,
+                'deal_won' => 0,
+                'lost' => 0,
+            ];
+
+            foreach ($allLatestItems as $item) {
+                if ($item->status === 'Quotation Requested' && stripos($item->notes ?? '', 'Quotation Sent') !== false) {
+                    $item->status = 'Quotation Sent';
+                    LeadFollowUp::where('id', $item->id)->update(['status' => 'Quotation Sent']);
+                }
+                $st = $item->status ?? '';
+                if (stripos($st, 'Deal') !== false || stripos($st, 'Won') !== false || stripos($st, 'Booking') !== false) {
+                    $outcomeCounts['deal_won']++;
+                } elseif (stripos($st, 'Quotation Sent') !== false || stripos($st, 'Quotation Send') !== false) {
+                    $outcomeCounts['quotation_sent']++;
+                } elseif (stripos($st, 'Quotation') !== false || stripos($st, 'Quote') !== false) {
+                    $outcomeCounts['quotation_requested']++;
+                } elseif (stripos($st, 'Interested') !== false || stripos($st, 'Call Back') !== false) {
+                    $outcomeCounts['interested']++;
+                } elseif (stripos($st, 'Negotiation') !== false || stripos($st, 'Price') !== false) {
+                    $outcomeCounts['negotiation']++;
+                } elseif (stripos($st, 'Reachable') !== false || stripos($st, 'Busy') !== false) {
+                    $outcomeCounts['not_reachable']++;
+                } elseif (stripos($st, 'Lost') !== false) {
+                    $outcomeCounts['lost']++;
+                }
+            }
+
+            $overdueCount = $allLatestItems->filter(function ($item) use ($today) {
+                return !empty($item->next_follow_up_date) && $item->next_follow_up_date < $today;
+            })->count();
+
+            $dueTodayCount = $allLatestItems->filter(function ($item) use ($today) {
+                return !empty($item->next_follow_up_date) && $item->next_follow_up_date === $today;
+            })->count();
+
+            $upcomingCount = $allLatestItems->filter(function ($item) use ($today) {
+                $next7Days = Carbon::today()->addDays(7)->toDateString();
+                return !empty($item->next_follow_up_date) &&
+                    $item->next_follow_up_date > $today &&
+                    $item->next_follow_up_date <= $next7Days;
+            })->count();
 
             return response()->json([
                 'status' => true,
                 'message' => 'Follow-up stats retrieved successfully',
-                'data' => [
+                'data' => array_merge($outcomeCounts, [
                     'overdue' => $overdueCount,
                     'due_today' => $dueTodayCount,
                     'upcoming' => $upcomingCount,
                     'total' => $totalCount,
-                ],
+                ]),
             ]);
         } catch (\Throwable $e) {
             Log::error('FollowUpController@stats error: ' . $e->getMessage());

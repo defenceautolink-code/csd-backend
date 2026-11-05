@@ -234,7 +234,7 @@ class DiscountApprovalController extends Controller
                 $approval->remarks = $request->input('remarks');
                 $approval->save();
 
-                $targetStatusName = $isApprove ? 'Discount Approved' : 'Discount Rejected';
+                $targetStatusName = 'Follow-up';
 
                 // Find or create the status in lead_statuses table
                 $leadStatus = LeadStatus::firstOrCreate(

@@ -63,7 +63,8 @@ class InsuranceController extends Controller
                 $records->push([
                     'id' => $ins->id,
                     'deal_id' => $ins->deal_id ?? $ins->deal?->deal_number ?? $ins->id,
-                    'customer_id' => $ins->customer_id ?? $ins->lead_id,
+                    'customer_id' => $ins->customer_id ?? $ins->lead_id ?? $ins->deal?->lead_id,
+                    'lead_id' => $ins->lead_id ?? $ins->customer_id ?? $ins->deal?->lead_id,
                     'customer_name' => $ins->customer_name ?? $ins->deal?->customer_name ?? '',
                     'customer_number' => $ins->customer_phone ?? $ins->deal?->customer_phone ?? '',
                     'customer_email' => $ins->customer_email ?? $ins->deal?->customer_email ?? '',

@@ -161,6 +161,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('deals/stats', [DealController::class, 'stats']);
     Route::get('deals/convert-lead/{leadId}', [DealController::class, 'getLeadForDeal']);
     Route::post('deals/convert-lead', [DealController::class, 'convertLead']);
+    Route::post('deals/{id}/insurance', [DealController::class, 'addInsurance']);
+    Route::post('deals/{id}/restore', [DealController::class, 'restore']);
+    Route::delete('deals/{id}/force', [DealController::class, 'forceDelete']);
     Route::get('deals/{dealId}/payments', [DealPaymentController::class, 'getByDeal']);
     Route::apiResource('deals', DealController::class);
 

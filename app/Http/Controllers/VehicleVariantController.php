@@ -50,6 +50,17 @@ class VehicleVariantController extends Controller
                 $query->where('status', $request->status);
             }
 
+            // Optional filter by price range (for ± ₹1,00,000 vehicle comparisons)
+            if ($request->filled('min_price')) {
+                $query->where('price', '>=', (float) $request->min_price);
+            }
+            if ($request->filled('max_price')) {
+                $query->where('price', '<=', (float) $request->max_price);
+            }
+            if ($request->filled('min_price') || $request->filled('max_price')) {
+                $query->orderBy('price', 'asc');
+            }
+
             // Handle Pagination or Full List
             $isAll = $request->boolean('all') || $request->get('per_page') === 'all' || (int) $request->get('per_page') === -1 || $request->get('paginate') === 'false';
 

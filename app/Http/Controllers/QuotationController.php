@@ -260,11 +260,19 @@ class QuotationController extends Controller
                 });
             }
 
-            // Task 2: Status filtering (frontend defaults to sent)
+            // Status filtering (supports 3 main statuses: pending, email_sent, print)
             if ($request->filled('status') && $request->status !== 'all' && $request->status !== 'deleted') {
                 $st = strtolower(trim($request->status));
-                if ($st === 'sent') {
-                    $query->whereIn('status', ['sent', 'approved', 'send']);
+                if ($st === 'email_sent' || $st === 'email sent' || $st === 'sent') {
+                    $query->whereIn('status', ['email_sent', 'email sent', 'sent']);
+                } elseif ($st === 'print' || $st === 'printed') {
+                    $query->whereIn('status', ['print', 'printed']);
+                } elseif ($st === 'pending') {
+                    $query->where(function ($q) {
+                        $q->where('status', 'pending')
+                          ->orWhereNull('status')
+                          ->orWhere('status', 'draft');
+                    });
                 } else {
                     $query->where('status', $st);
                 }
@@ -329,7 +337,7 @@ class QuotationController extends Controller
                 'payment_terms' => 'nullable|string',
                 'delivery_terms' => 'nullable|string',
                 'notes' => 'nullable|string',
-                'status' => 'nullable|in:pending,draft,sent,send,print,printed,accepted,rejected,expired',
+                'status' => 'nullable|in:pending,draft,sent,send,print,printed,email_sent,email sent,accepted,rejected,expired',
                 'items' => 'required|array|min:1',
                 'items.*.item_name' => 'required|string|max:255',
                 'items.*.description' => 'nullable|string',
@@ -386,7 +394,11 @@ class QuotationController extends Controller
                     'payment_terms' => $validated['payment_terms'] ?? null,
                     'delivery_terms' => $validated['delivery_terms'] ?? null,
                     'notes' => $validated['notes'] ?? null,
-                    'status' => $validated['status'] ?? 'pending',
+                    'status' => in_array(strtolower(trim($validated['status'] ?? 'pending')), ['print', 'printed'])
+                        ? 'print'
+                        : (in_array(strtolower(trim($validated['status'] ?? 'pending')), ['email_sent', 'email sent', 'sent', 'send'])
+                            ? 'email_sent'
+                            : 'pending'),
                     'created_by' => $user?->id,
                 ]);
 
@@ -411,7 +423,7 @@ class QuotationController extends Controller
                         'follow_up_time' => now()->format('h:i A'),
                         'type' => 'Quotation Sent',
                         'notes' => "Quotation Sent: Official Quotation #{$quotationNumber} generated for {$validated['subject']} (Grand Total: ₹" . number_format($grandTotal, 2) . ").",
-                        'status' => 'Quotation Requested',
+                        'status' => 'Quotation Sent',
                     ]);
 
                     $quotationSentStatus = LeadStatus::where('name', 'Quotation Sent')->first();
@@ -533,7 +545,7 @@ class QuotationController extends Controller
                 'payment_terms' => 'nullable|string',
                 'delivery_terms' => 'nullable|string',
                 'notes' => 'nullable|string',
-                'status' => 'nullable|in:pending,draft,sent,send,print,printed,accepted,rejected,expired',
+                'status' => 'nullable|in:pending,draft,sent,send,print,printed,email_sent,email sent,accepted,rejected,expired',
                 'items' => 'required|array|min:1',
                 'items.*.item_name' => 'required|string|max:255',
                 'items.*.description' => 'nullable|string',
@@ -681,12 +693,28 @@ class QuotationController extends Controller
                 ], 422);
             }
 
-            // Send email using Mailable
-            Mail::to($recipientEmail)->send(new QuotationMailable(
-                $quotation,
-                $request->input('custom_subject'),
-                $request->input('custom_message')
-            ));
+            // Send email using Mailable (safe dispatch with graceful fallback)
+            $emailSent = false;
+            $emailWarning = null;
+            try {
+                Mail::to($recipientEmail)->send(new QuotationMailable(
+                    $quotation,
+                    $request->input('custom_subject'),
+                    $request->input('custom_message')
+                ));
+                $emailSent = true;
+            } catch (\Throwable $mailErr) {
+                Log::error("SMTP dispatch note for quotation #{$quotation->id}: " . $mailErr->getMessage());
+                $emailWarning = $mailErr->getMessage();
+            }
+
+            if (!$emailSent) {
+                return response()->json([
+                    'status' => false,
+                    'email_delivered' => false,
+                    'message' => 'Failed to send email via SMTP. Reason: ' . ($emailWarning ?? 'SMTP Authentication error. Please verify Google App Password in .env.'),
+                ], 500);
+            }
 
             // Update quotation status & timestamp
             $quotation->update([
@@ -705,7 +733,7 @@ class QuotationController extends Controller
                         'follow_up_time' => now()->format('h:i A'),
                         'type' => 'Email',
                         'notes' => "Quotation Sent: Official Quotation #{$quotation->quotation_number} emailed to {$recipientEmail} for {$quotation->subject} (Grand Total: ₹" . number_format($quotation->grand_total, 2) . ").",
-                        'status' => 'Quotation Requested',
+                        'status' => 'Quotation Sent',
                     ]);
 
                     $quotationSentStatus = LeadStatus::where('name', 'Quotation Sent')->first();
@@ -716,9 +744,14 @@ class QuotationController extends Controller
                 }
             }
 
+            $successMsg = $emailSent
+                ? "Quotation #{$quotation->quotation_number} has been successfully emailed to {$recipientEmail}."
+                : "Quotation #{$quotation->quotation_number} status updated to Sent in CRM. (Note: Email delivery via SMTP failed: {$emailWarning})";
+
             return response()->json([
                 'status' => true,
-                'message' => "Quotation #{$quotation->quotation_number} has been successfully sent to {$recipientEmail}.",
+                'email_delivered' => $emailSent,
+                'message' => $successMsg,
                 'data' => $quotation->fresh(['items', 'lead', 'creator']),
             ]);
         } catch (\Throwable $e) {
@@ -728,7 +761,7 @@ class QuotationController extends Controller
 
             return response()->json([
                 'status' => false,
-                'message' => 'Failed to send quotation email. Error: ' . $e->getMessage(),
+                'message' => 'Failed to process quotation email request: ' . $e->getMessage(),
             ], 500);
         }
     }

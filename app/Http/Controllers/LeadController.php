@@ -86,7 +86,35 @@ class LeadController extends Controller
 
             // Filter by Status Name or Status ID
             if ($request->filled('status') && $request->status !== 'deleted') {
-                $query->where('status_name', $request->status);
+                $statusReq = trim($request->status);
+                if (stripos($statusReq, 'follow') !== false) {
+                    $query->where(function ($q) {
+                        $q->where('status_name', 'like', '%Follow%')
+                          ->orWhere('status_name', 'like', '%Discount%');
+                    })
+                    ->where('status_name', 'not like', '%Quote%')
+                    ->where('status_name', 'not like', '%Quotation%')
+                    ->where('status_name', 'not like', '%Deal%')
+                    ->where('status_name', 'not like', '%Booking%')
+                    ->where('status_name', 'not like', '%Lost%');
+                } elseif (stripos($statusReq, 'quote') !== false) {
+                    $query->where(function ($q) {
+                        $q->where('status_name', 'like', '%Quote%')
+                          ->orWhere('status_name', 'like', '%Quotation%');
+                    });
+                } elseif (stripos($statusReq, 'deal') !== false || stripos($statusReq, 'booking') !== false) {
+                    $query->where(function ($q) {
+                        $q->where('status_name', 'like', '%Deal%')
+                          ->orWhere('status_name', 'like', '%Booking%')
+                          ->orWhere('status_name', 'like', '%Won%');
+                    });
+                } elseif (stripos($statusReq, 'lost') !== false) {
+                    $query->where('status_name', 'like', '%Lost%');
+                } elseif (stripos($statusReq, 'new') !== false) {
+                    $query->where('status_name', 'New');
+                } else {
+                    $query->where('status_name', $statusReq);
+                }
             }
             if ($request->filled('status_id')) {
                 $query->where('status_id', $request->status_id);
@@ -392,6 +420,9 @@ class LeadController extends Controller
                 'latestAssignment.assignedToUser',
                 'followUps.user',
                 'assignmentHistories.assignedByUser',
+                'insurances.renewalHistories',
+                'deals.insurances.renewalHistories',
+                'latestDeal.insurances.renewalHistories',
             ])->find($id);
 
             if (!$lead) {

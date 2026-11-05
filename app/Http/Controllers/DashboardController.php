@@ -43,6 +43,11 @@ class DashboardController extends Controller
 
             // 1. KPI Cards (5 Primary Metrics for Dashboard)
             $totalLeads = Lead::count();
+            $newLeads = Lead::where(function ($q) {
+                $q->where('status_name', 'like', '%New%')
+                  ->orWhereNull('status_name')
+                  ->orWhere('status_name', '');
+            })->count();
             
             // Calculate lead growth percentage comparing this month vs last month
             $startThisMonth = Carbon::now()->startOfMonth();
@@ -237,8 +242,9 @@ class DashboardController extends Controller
                 'data' => [
                     'date_display' => Carbon::now()->format('d M Y'),
                     'kpis' => [
-                        //  The 5 core KPI metrics
+                        // The 6 core KPI metrics
                         'total_leads' => $totalLeads,
+                        'new_leads' => $newLeads,
                         'lead_growth' => ($leadGrowth >= 0 ? "↑ {$leadGrowth}%" : "↓ " . abs($leadGrowth) . "%"),
                         'total_follow_up' => $totalFollowUp,
                         'in_follow_up' => $totalFollowUp,
@@ -368,6 +374,11 @@ class DashboardController extends Controller
             // --- 5 CORE KPI METRICS ---
             // Total Leads
             $totalLeads = (clone $leadQuery)->count();
+            $newLeads = (clone $leadQuery)->where(function ($q) {
+                $q->where('status_name', 'like', '%New%')
+                  ->orWhereNull('status_name')
+                  ->orWhere('status_name', '');
+            })->count();
 
             // Lead Growth (%)
             $startThisMonth = Carbon::now()->startOfMonth();
@@ -586,6 +597,7 @@ class DashboardController extends Controller
                     'user_name' => $targetUserName,
                     'kpis' => [
                         'total_leads' => $totalLeads,
+                        'new_leads' => $newLeads,
                         'lead_growth' => ($leadGrowth >= 0 ? "↑ {$leadGrowth}%" : "↓ " . abs($leadGrowth) . "%"),
                         'total_follow_up' => $totalFollowUp,
                         'total_quotation' => $totalQuotation,
@@ -625,6 +637,11 @@ class DashboardController extends Controller
 
             // 1. KPI Cards (5 Primary Metrics matching Super Admin Dashboard)
             $totalLeads = Lead::count();
+            $newLeads = Lead::where(function ($q) {
+                $q->where('status_name', 'like', '%New%')
+                  ->orWhereNull('status_name')
+                  ->orWhere('status_name', '');
+            })->count();
 
             // Calculate lead growth percentage comparing this month vs last month
             $startThisMonth = Carbon::now()->startOfMonth();
@@ -830,6 +847,7 @@ class DashboardController extends Controller
                     'date_display' => Carbon::now()->format('d M Y'),
                     'kpis' => [
                         'total_leads' => $totalLeads,
+                        'new_leads' => $newLeads,
                         'lead_growth' => ($leadGrowth >= 0 ? "↑ {$leadGrowth}%" : "↓ " . abs($leadGrowth) . "%"),
                         'total_follow_up' => $totalFollowUp,
                         'total_quotation' => $totalQuotation,
