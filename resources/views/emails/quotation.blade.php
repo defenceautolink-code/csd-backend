@@ -54,6 +54,7 @@
 
     $bhRto = $findVal('BH Series');
     if ($bhRto === 'N.A') $bhRto = $findVal('BH RTO');
+    if ($bhRto === 'N.A') $bhRto = $findVal('BH');
 
     $crtm = $findVal('CRTM');
     $insurance = $findVal('Insurance');
@@ -61,6 +62,8 @@
     $warranty = $findVal('Warranty');
     $diffAmtCash = $findVal('Difference');
     if ($diffAmtCash === 'N.A') $diffAmtCash = $findVal('Cash Adjustment');
+    if ($diffAmtCash === 'N.A') $diffAmtCash = $findVal('DIFFERENCE AMT CASH');
+    if ($diffAmtCash === 'N.A') $diffAmtCash = $findVal('Cash');
 
     $displayDate = \Carbon\Carbon::parse($quotation->quotation_date ?? now())->format('d.m.y');
     $clientName = strtoupper($quotation->customer_name ?? '');
