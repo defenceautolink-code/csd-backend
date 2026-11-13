@@ -416,15 +416,22 @@ class QuotationController extends Controller
             if (!empty($validated['lead_id'])) {
                 $lead = Lead::find($validated['lead_id']);
                 if ($lead) {
-                    LeadFollowUp::create([
-                        'lead_id' => $lead->id,
-                        'user_id' => $user?->id ?? ($lead->assigned_to ?? 1),
-                        'follow_up_date' => now()->toDateString(),
-                        'follow_up_time' => now()->format('h:i A'),
-                        'type' => 'Quotation Sent',
-                        'notes' => "Quotation Sent: Official Quotation #{$quotationNumber} generated for {$validated['subject']} (Grand Total: ₹" . number_format($grandTotal, 2) . ").",
-                        'status' => 'Quotation Sent',
-                    ]);
+                    $alreadyLogged = LeadFollowUp::where('lead_id', $lead->id)
+                        ->where('type', 'Quotation Sent')
+                        ->where('notes', 'like', "%#{$quotationNumber}%")
+                        ->exists();
+
+                    if (!$alreadyLogged) {
+                        LeadFollowUp::create([
+                            'lead_id' => $lead->id,
+                            'user_id' => $user?->id ?? ($lead->assigned_to ?? 1),
+                            'follow_up_date' => now()->toDateString(),
+                            'follow_up_time' => now()->format('h:i A'),
+                            'type' => 'Quotation Sent',
+                            'notes' => "Official Quotation #{$quotationNumber} generated for {$validated['subject']} (Grand Total: ₹" . number_format($grandTotal, 2) . ").",
+                            'status' => 'Quotation Sent',
+                        ]);
+                    }
 
                     $quotationSentStatus = LeadStatus::where('name', 'Quotation Sent')->first();
                     $lead->update([
@@ -911,9 +918,9 @@ class QuotationController extends Controller
         }
     }
 
-    /**
+   /**
      * Permanently Delete (Hard Delete) a quotation
-     */
+     */ 
     public function forceDelete($id)
     {
         try {

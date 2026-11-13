@@ -28,6 +28,7 @@ class Lead extends Model
         'variant_id',
         'model_variant',
         'priority',
+        'budget',
         'purchase_timeline',
         'source_id',
         'source_name',
@@ -51,6 +52,7 @@ class Lead extends Model
         'last_anniversary_wished_year' => 'integer',
         'requested_discount' => 'float',
         'approved_discount' => 'float',
+        'budget' => 'float',
     ];
 
     /**

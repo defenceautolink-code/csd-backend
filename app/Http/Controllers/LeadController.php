@@ -15,6 +15,24 @@ use Illuminate\Http\Request;
 class LeadController extends Controller
 {
     /**
+     * Ensure budget column exists in leads table gracefully
+     */
+    protected static function ensureBudgetColumn()
+    {
+        static $checked = false;
+        if ($checked) return;
+        $checked = true;
+        try {
+            if (!\Illuminate\Support\Facades\Schema::hasColumn('leads', 'budget')) {
+                \Illuminate\Support\Facades\Schema::table('leads', function ($table) {
+                    $table->decimal('budget', 15, 2)->nullable()->after('priority');
+                });
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Auto-add budget column notice: ' . $e->getMessage());
+        }
+    }
+    /**
      * Get list of all leads with associated relationships & filters
      * Supports backend role-based access control for authenticated user
      */
@@ -234,6 +252,7 @@ class LeadController extends Controller
                 'variant_id' => 'nullable',
                 'model_variant' => 'nullable|string|max:255',
                 'priority' => 'nullable|string',
+                'budget' => 'nullable|numeric',
                 'purchase_timeline' => 'nullable|string|max:100',
                 'source_id' => 'nullable',
                 'source_name' => 'nullable|string|max:100',
@@ -328,11 +347,14 @@ class LeadController extends Controller
             [$assignedToId, $assignedUserName] = $this->resolveAssignToUser($request->assigned_to, $request->assigned_user_name);
             $assignById = $this->resolveAssignByUserId($request->assign_by);
 
+            self::ensureBudgetColumn();
+            $hasBudget = \Illuminate\Support\Facades\Schema::hasColumn('leads', 'budget');
+
             $lead = \Illuminate\Support\Facades\DB::transaction(function () use (
                 $request, $brandId, $brandName, $modelId, $variantId, $modelVariant, $sourceId, $sourceName, $statusId, $statusName,
-                $segment, $priority, $birthDate, $anniversaryDate, $assignedToId, $assignedUserName, $assignById
+                $segment, $priority, $birthDate, $anniversaryDate, $assignedToId, $assignedUserName, $assignById, $hasBudget
             ) {
-                $lead = Lead::create([
+                $createPayload = [
                     'name' => $request->name,
                     'email' => $request->filled('email') ? $request->email : null,
                     'phone' => $request->phone,
@@ -355,7 +377,13 @@ class LeadController extends Controller
                     'status_name' => $statusName,
                     'assigned_to' => $assignedToId,
                     'assigned_user_name' => $assignedUserName,
-                ]);
+                ];
+
+                if ($hasBudget) {
+                    $createPayload['budget'] = $request->filled('budget') ? (float) $request->budget : null;
+                }
+
+                $lead = Lead::create($createPayload);
 
                 // Automatically log initial assignment history with resolved user IDs
                 if ($assignedToId) {
@@ -500,6 +528,7 @@ class LeadController extends Controller
                 'variant_id' => 'nullable',
                 'model_variant' => 'sometimes|nullable|string|max:255',
                 'priority' => 'sometimes|required|string|in:Hot,Warm,Cold,hot,warm,cold',
+                'budget' => 'nullable|numeric',
                 'purchase_timeline' => 'nullable|string|max:100',
                 'source_id' => 'nullable|exists:lead_sources,id',
                 'source_name' => 'nullable|string|max:100',
@@ -563,6 +592,9 @@ class LeadController extends Controller
             if ($request->has('variant_id')) $updateData['variant_id'] = $request->filled('variant_id') ? $request->variant_id : null;
             if ($request->has('model_variant')) $updateData['model_variant'] = $request->model_variant;
             if ($request->has('priority')) $updateData['priority'] = ucfirst(strtolower($request->priority));
+            self::ensureBudgetColumn();
+            $hasBudget = \Illuminate\Support\Facades\Schema::hasColumn('leads', 'budget');
+            if ($request->has('budget') && $hasBudget) $updateData['budget'] = $request->filled('budget') ? (float) $request->budget : null;
             if ($request->has('purchase_timeline')) $updateData['purchase_timeline'] = $request->purchase_timeline;
             if ($request->has('source_id')) $updateData['source_id'] = $request->source_id;
             if ($request->has('status_id')) $updateData['status_id'] = $request->status_id;
@@ -1223,6 +1255,7 @@ class LeadController extends Controller
                         'variant_id' => !empty($row['variant_id']) && is_numeric($row['variant_id']) ? (int) $row['variant_id'] : null,
                         'model_variant' => $modelVariant ?: 'Inquiry Model',
                         'priority' => $priority,
+                    'budget' => $request->filled('budget') ? (float) $request->budget : null,
                         'purchase_timeline' => !empty($row['purchase_timeline']) ? $row['purchase_timeline'] : null,
                         'source_id' => $sourceId,
                         'source_name' => $sourceName,

@@ -15,6 +15,7 @@ use App\Http\Controllers\DiscountApprovalController;
 use App\Http\Controllers\ExpenseCategoryController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\InsuranceController;
+use App\Http\Controllers\InsuranceCompanyController;
 use App\Http\Controllers\SalesExecutiveLeadController;
 use App\Http\Controllers\QuotationController;
 use App\Http\Controllers\UserController;
@@ -180,6 +181,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('expenses', ExpenseController::class);
 
     // Vehicle Insurance & Renewal Reminders API Routes
+    Route::get('insurance-companies/stats', [InsuranceCompanyController::class, 'stats']);
+    Route::get('insurance-companies/active-list', [InsuranceCompanyController::class, 'activeList']);
+    Route::apiResource('insurance-companies', InsuranceCompanyController::class);
+
     Route::get('insurances', [InsuranceController::class, 'index']);
     Route::post('insurances/store', [InsuranceController::class, 'store']);
     Route::put('insurances/{id}', [InsuranceController::class, 'update']);
