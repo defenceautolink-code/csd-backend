@@ -237,5 +237,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/filters', [ActivityLogController::class, 'getFilters']);
         Route::get('/export', [ActivityLogController::class, 'export']);
         Route::post('/log-action', [ActivityLogController::class, 'logAction']);
+        Route::delete('/clean-old', [ActivityLogController::class, 'cleanOldLogs']);
     });
 });

@@ -283,4 +283,55 @@ class ActivityLogController extends Controller
             return response()->json(['status' => false, 'message' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * Delete logs older than given months (default 2 months)
+     */
+    public function cleanOldLogs(Request $request)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+
+            $months = max(1, (int) $request->input('months', 2));
+            // Cut-off date: $months months before now in Asia/Kolkata
+            $cutoffDate = Carbon::now('Asia/Kolkata')->subMonths($months)->startOfDay();
+            $cutoffUtc = $cutoffDate->copy()->setTimezone('UTC');
+
+            // Count how many records will be deleted
+            $count = ActivityLog::where('created_at', '<', $cutoffUtc)->count();
+
+            if ($count === 0) {
+                return response()->json([
+                    'status' => true,
+                    'message' => 'No activity logs older than ' . $months . ' months found (Cut-off: ' . $cutoffDate->format('d M Y') . ').',
+                    'deleted_count' => 0,
+                    'cutoff_date' => $cutoffDate->format('d M Y'),
+                ]);
+            }
+
+            // Perform deletion
+            ActivityLog::where('created_at', '<', $cutoffUtc)->delete();
+
+            // Record an activity log for this deletion action
+            ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => 'Activity Logs',
+                'action' => 'delete',
+                'detail' => "Deleted {$count} old activity logs created before {$cutoffDate->format('d M Y')} (> {$months} months old)",
+                'ip_address' => ActivityLog::getClientIpv4($request),
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => "Successfully deleted {$count} activity logs older than {$months} months (before {$cutoffDate->format('d M Y')}).",
+                'deleted_count' => $count,
+                'cutoff_date' => $cutoffDate->format('d M Y'),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to delete old activity logs: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
