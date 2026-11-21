@@ -137,6 +137,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Dedicated Live KPI Stats API for Lead Pipeline Cards
     Route::get('leads/stats', [LeadController::class, 'stats']);
 
+    // Quick Inline Birth & Anniversary Dates Update API
+    Route::match(['post', 'put', 'patch'], 'leads/{id}/dates', [LeadController::class, 'updateDates']);
+
     // Customer Leads Master CRUD API
     Route::post('leads/{id}/restore', [LeadController::class, 'restore']);
     Route::post('leads/bulk-restore', [LeadController::class, 'bulkRestore']);

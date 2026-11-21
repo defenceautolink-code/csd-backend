@@ -168,6 +168,33 @@ class LeadController extends Controller
                 $query->where('assigned_to', $request->assigned_to);
             }
 
+            // Filter by Missing Birthday / Anniversary
+            if ($request->filled('date_status') || $request->filled('dates_filter')) {
+                $dateFilter = $request->input('date_status') ?? $request->input('dates_filter');
+                if ($dateFilter === 'missing_birth_date' || $dateFilter === 'no_birth_date') {
+                    $query->where(function ($q) {
+                        $q->whereNull('birth_date')->orWhere('birth_date', '');
+                    });
+                } elseif ($dateFilter === 'missing_anniversary_date' || $dateFilter === 'no_anniversary_date') {
+                    $query->where(function ($q) {
+                        $q->whereNull('anniversary_date')->orWhere('anniversary_date', '');
+                    });
+                } elseif ($dateFilter === 'missing_both' || $dateFilter === 'no_both_dates') {
+                    $query->where(function ($q) {
+                        $q->where(function ($q1) {
+                            $q1->whereNull('birth_date')->orWhere('birth_date', '');
+                        })->where(function ($q2) {
+                            $q2->whereNull('anniversary_date')->orWhere('anniversary_date', '');
+                        });
+                    });
+                } elseif ($dateFilter === 'has_both') {
+                    $query->whereNotNull('birth_date')
+                          ->where('birth_date', '!=', '')
+                          ->whereNotNull('anniversary_date')
+                          ->where('anniversary_date', '!=', '');
+                }
+            }
+
             // Date Range & Single Date Filters (start_date, end_date, startDate, endDate, from_date, to_date, date)
             $startDate = $request->input('start_date') ?? $request->input('startDate') ?? $request->input('from_date') ?? $request->input('date_from');
             $endDate = $request->input('end_date') ?? $request->input('endDate') ?? $request->input('to_date') ?? $request->input('date_to');
@@ -641,6 +668,67 @@ class LeadController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'An error occurred while updating lead.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Quick inline update for Birth Date and Anniversary Date
+     */
+    public function updateDates(Request $request, $id)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            $lead = Lead::find($id);
+
+            if (!$lead) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Lead not found',
+                ], 404);
+            }
+
+            // Scope check for Sales Executive
+            if ($user && in_array(strtolower(str_replace(' ', '_', $user->role)), ['sales_executive', 'sales_rep', 'sales_consultant'])) {
+                $isOwner = ($lead->assigned_to == $user->id) || (!empty($lead->assigned_user_name) && stripos($lead->assigned_user_name, $user->name) !== false);
+                if (!$isOwner) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'You do not have permission to update this lead.',
+                    ], 403);
+                }
+            }
+
+            $updateData = [];
+            if ($request->has('birth_date')) {
+                $val = $request->input('birth_date');
+                $updateData['birth_date'] = (!empty($val) && $val !== 'null' && $val !== 'undefined') ? date('Y-m-d', strtotime($val)) : null;
+            }
+            if ($request->has('anniversary_date')) {
+                $val = $request->input('anniversary_date');
+                $updateData['anniversary_date'] = (!empty($val) && $val !== 'null' && $val !== 'undefined') ? date('Y-m-d', strtotime($val)) : null;
+            }
+
+            $lead->update($updateData);
+
+            ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => 'Leads',
+                'action' => 'edit',
+                'detail' => "Updated dates for Lead #{$lead->id} ({$lead->name}): Birth Date: " . ($lead->birth_date ?? 'Not set') . ", Anniversary Date: " . ($lead->anniversary_date ?? 'Not set'),
+                'ip_address' => ActivityLog::getClientIpv4($request),
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Lead dates updated successfully',
+                'data' => $lead->fresh(),
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('LeadController@updateDates error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to update lead dates: ' . $e->getMessage(),
             ], 500);
         }
     }

@@ -861,6 +861,17 @@ class DealController extends Controller
             $deal->save();
             $deal->recalculateFinancials();
 
+            if (isset($validated['deal_status']) && strtolower($validated['deal_status']) === 'cancelled') {
+                $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+                ActivityLog::record([
+                    'user_id' => $user?->id,
+                    'module' => 'Deals',
+                    'action' => 'delete',
+                    'detail' => "Deal #{$deal->deal_number} ({$deal->customer_name}) status updated to Cancelled." . (!empty($validated['cancellation_reason']) ? " Reason: {$validated['cancellation_reason']}" : ""),
+                    'ip_address' => ActivityLog::getClientIpv4($request),
+                ]);
+            }
+
             $deal->load(['lead', 'quotation', 'brand', 'salesExecutive', 'payments']);
 
             return response()->json([
@@ -899,6 +910,14 @@ class DealController extends Controller
             }
 
             $deal->delete();
+
+            $user = request()->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => 'Deals',
+                'action' => 'delete',
+                'detail' => "Deal #{$deal->deal_number} ({$deal->customer_name}) cancelled / moved to trash.",
+            ]);
 
             return response()->json([
                 'status' => true,
@@ -1105,6 +1124,15 @@ class DealController extends Controller
                 'policy_number' => $validated['policy_number'],
             ]);
 
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => 'Insurance',
+                'action' => 'add',
+                'detail' => "Added insurance policy #{$validated['policy_number']} ({$validated['insurance_company']}) for Deal #{$deal->deal_number} ({$deal->customer_name}).",
+                'ip_address' => ActivityLog::getClientIpv4($request),
+            ]);
+
             return response()->json([
                 'status' => true,
                 'message' => 'Insurance policy added to Deal successfully!',
@@ -1276,13 +1304,12 @@ class DealController extends Controller
                 }
 
                 // 6. Log in Activity Log
-                ActivityLog::create([
-                    'action' => 'TRASH',
-                    'action_type' => 'deal_cancelled_refund',
+                ActivityLog::record([
                     'user_id' => $user?->id,
-                    'user_name' => $user?->name ?? 'Admin',
-                    'description' => "Deal #{$deal->deal_number} ({$deal->customer_name}) cancelled. Refund of Rs. " . number_format($refundAmount) . " processed.",
-                    'ip_address' => $request->ip(),
+                    'module' => 'Deals',
+                    'action' => 'delete',
+                    'detail' => "Deal #{$deal->deal_number} ({$deal->customer_name}) cancelled. Refund of Rs. " . number_format($refundAmount) . " processed." . ($reason ? " Reason: {$reason}" : ""),
+                    'ip_address' => ActivityLog::getClientIpv4($request),
                 ]);
 
                 return response()->json([

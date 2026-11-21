@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Deal;
 use App\Models\Insurance;
 use App\Models\InsuranceRenewalHistory;
+use App\Models\ActivityLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -60,11 +61,17 @@ class InsuranceController extends Controller
                     }
                 }
 
+                $leadId = $ins->lead_id 
+                    ?? $ins->deal?->lead_id 
+                    ?? $ins->customer_id 
+                    ?? (!empty($ins->customer_phone) ? \App\Models\Lead::where('phone', $ins->customer_phone)->value('id') : null)
+                    ?? (!empty($ins->customer_name) ? \App\Models\Lead::where('name', $ins->customer_name)->value('id') : null);
+
                 $records->push([
                     'id' => $ins->id,
                     'deal_id' => $ins->deal_id ?? $ins->deal?->deal_number ?? $ins->id,
-                    'customer_id' => $ins->customer_id ?? $ins->lead_id ?? $ins->deal?->lead_id,
-                    'lead_id' => $ins->lead_id ?? $ins->customer_id ?? $ins->deal?->lead_id,
+                    'customer_id' => $leadId ?? $ins->customer_id ?? $ins->lead_id,
+                    'lead_id' => $leadId,
                     'customer_name' => $ins->customer_name ?? $ins->deal?->customer_name ?? '',
                     'customer_number' => $ins->customer_phone ?? $ins->deal?->customer_phone ?? '',
                     'customer_email' => $ins->customer_email ?? $ins->deal?->customer_email ?? '',
@@ -367,7 +374,7 @@ class InsuranceController extends Controller
                 'created_by' => $user?->id,
             ]);
 
-            return response()->json([
+            $responseData = [
                 'status' => true,
                 'message' => 'Insurance record created successfully',
                 'data' => [
@@ -391,7 +398,18 @@ class InsuranceController extends Controller
                     'status' => 'active',
                     'renewal_status' => $insurance->renewal_status,
                 ],
-            ], 201);
+            ];
+
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => 'Insurance',
+                'action' => 'add',
+                'detail' => "Added insurance policy #{$insurance->policy_number} ({$insurance->insurance_company}) for customer {$insurance->customer_name} (Vehicle: {$insurance->vehicle_name}).",
+                'ip_address' => ActivityLog::getClientIpv4($request),
+            ]);
+
+            return response()->json($responseData, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'status' => false,
@@ -492,6 +510,15 @@ class InsuranceController extends Controller
             if (array_key_exists('notes', $validated)) $insurance->notes = $validated['notes'];
 
             $insurance->save();
+
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => 'Insurance',
+                'action' => 'edit',
+                'detail' => "Updated insurance policy #{$insurance->policy_number} for customer {$insurance->customer_name}.",
+                'ip_address' => ActivityLog::getClientIpv4($request),
+            ]);
 
             return response()->json([
                 'status' => true,
@@ -615,7 +642,7 @@ class InsuranceController extends Controller
 
             $deal = $insurance->deal ?? Deal::find($insurance->deal_id);
 
-            return response()->json([
+            $renewResponsePayload = [
                 'status' => true,
                 'message' => "Insurance policy renewed successfully. New Expire Date: {$newExpireDate}, Reminder Date: {$newReminderDate}",
                 'data' => [
@@ -640,7 +667,18 @@ class InsuranceController extends Controller
                     'renewal_status' => 'Renewed',
                     'notes' => $insurance->notes,
                 ],
+            ];
+
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+            ActivityLog::record([
+                'user_id' => $user?->id,
+                'module' => 'Insurance',
+                'action' => 'edit',
+                'detail' => "Renewed insurance policy #{$insurance->policy_number} ({$insurance->insurance_company}) for customer {$insurance->customer_name}. Next expiry: {$newExpireDate}.",
+                'ip_address' => ActivityLog::getClientIpv4($request),
             ]);
+
+            return response()->json($renewResponsePayload);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'status' => false,
@@ -754,10 +792,17 @@ class InsuranceController extends Controller
                     }
                 }
 
+                $leadId = $ins->lead_id 
+                    ?? $ins->deal?->lead_id 
+                    ?? $ins->customer_id 
+                    ?? (!empty($ins->customer_phone) ? \App\Models\Lead::where('phone', $ins->customer_phone)->value('id') : null)
+                    ?? (!empty($ins->customer_name) ? \App\Models\Lead::where('name', $ins->customer_name)->value('id') : null);
+
                 return [
                     'id' => $ins->id,
+                    'lead_id' => $leadId,
                     'deal_id' => $ins->deal_id ?? $ins->deal?->deal_number ?? null,
-                    'customer_id' => $ins->customer_id ?? $ins->lead_id,
+                    'customer_id' => $leadId ?? $ins->customer_id ?? $ins->lead_id,
                     'customer_name' => $ins->customer_name ?? $ins->deal?->customer_name ?? '',
                     'customer_number' => $ins->customer_phone ?? $ins->deal?->customer_phone ?? '',
                     'customer_phone' => $ins->customer_phone ?? $ins->deal?->customer_phone ?? '',
