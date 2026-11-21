@@ -24,6 +24,10 @@ use App\Http\Controllers\VehiclePriceMasterController;
 use App\Http\Controllers\VehicleVariantController;
 use App\Http\Controllers\ActivityLogController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\BlogController;
+use App\Http\Controllers\CrmPageController;
+use App\Http\Controllers\ContactInquiryController;
+use App\Http\Controllers\VisitorController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -37,6 +41,20 @@ use Illuminate\Support\Facades\Route;
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/auth/reset-password', [AuthController::class, 'resetPassword']);
+
+/*
+|--------------------------------------------------------------------------
+| PUBLIC VISITOR APIS (Website, Blogs, Useful Links, Contact Us)
+|--------------------------------------------------------------------------
+*/
+Route::prefix('visitor')->group(function () {
+    Route::get('blogs', [VisitorController::class, 'getBlogs']);
+    Route::get('blogs/{slug}', [VisitorController::class, 'getBlogBySlug']);
+    Route::post('blogs/{id}/like', [VisitorController::class, 'likeBlog']);
+    Route::get('crm-pages', [VisitorController::class, 'getCrmPages']);
+    Route::get('crm-pages/{slug}', [VisitorController::class, 'getCrmPageBySlug']);
+    Route::post('contact', [VisitorController::class, 'submitContact']);
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -244,4 +262,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/log-action', [ActivityLogController::class, 'logAction']);
         Route::delete('/clean-old', [ActivityLogController::class, 'cleanOldLogs']);
     });
+
+    // CMS & Website Management APIs
+    Route::apiResource('blogs', BlogController::class);
+    Route::match(['post', 'put', 'patch'], 'blogs/{id}', [BlogController::class, 'updateWithFile']);
+    Route::patch('blogs/{id}/status', [BlogController::class, 'toggleStatus']);
+
+    Route::apiResource('crm-pages', CrmPageController::class);
+    Route::match(['post', 'put', 'patch'], 'crm-pages/{id}', [CrmPageController::class, 'updateWithFile']);
+    Route::patch('crm-pages/{id}/status', [CrmPageController::class, 'toggleStatus']);
+
+    Route::get('contact-inquiries', [ContactInquiryController::class, 'index']);
+    Route::get('contact-inquiries/{id}', [ContactInquiryController::class, 'show']);
+    Route::delete('contact-inquiries/{id}', [ContactInquiryController::class, 'destroy']);
 });
