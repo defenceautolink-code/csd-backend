@@ -240,20 +240,20 @@ class InsuranceCompanyController extends Controller
     }
 
     /**
-     * Destroy
+     * Permanently delete (hard delete) the specified insurance company
      */
     public function destroy($id)
     {
         $company = InsuranceCompany::find($id);
         if (!$company) {
-            return response()->json(['status' => false, 'message' => 'Not found'], 404);
+            return response()->json(['status' => false, 'message' => 'Insurance company not found'], 404);
         }
 
         try {
             $company->delete();
             return response()->json([
                 'status' => true,
-                'message' => 'Insurance company deleted successfully',
+                'message' => 'Insurance company permanently deleted successfully',
             ]);
         } catch (\Exception $e) {
             return response()->json([

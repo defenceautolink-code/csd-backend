@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ActivityLog;
 use App\Models\Deal;
 use App\Models\DealPayment;
+use App\Models\InstallmentInvoice;
 use App\Models\Insurance;
 use App\Models\Lead;
 use App\Models\LeadFollowUp;
@@ -987,10 +989,11 @@ class DealController extends Controller
                 $dealQuery->whereDate('booking_date', '<=', $endDate);
             }
 
-            $totalDeals = (clone $dealQuery)->count();
-            $totalGrossValue = (float) (clone $dealQuery)->sum('net_amount');
+            // Total Active Deals: Exclude cancelled deals
+            $totalDeals = (clone $dealQuery)->whereNotIn('deal_status', ['cancelled'])->count();
+            $totalGrossValue = (float) (clone $dealQuery)->whereNotIn('deal_status', ['cancelled'])->sum('net_amount');
             $totalCollected = (float) (clone $dealQuery)->sum('total_paid');
-            $totalPendingBalance = (float) (clone $dealQuery)->sum('balance_due');
+            $totalPendingBalance = (float) (clone $dealQuery)->whereNotIn('deal_status', ['cancelled'])->sum('balance_due');
 
             $activeBookings = (clone $dealQuery)->whereNotIn('deal_status', ['delivered', 'cancelled'])->count();
             $deliveredDeals = (clone $dealQuery)->where('deal_status', 'delivered')->count();
@@ -1115,6 +1118,210 @@ class DealController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage() ?: 'Failed to attach insurance to deal.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Process Money Return / Refund and Cancel Deal
+     * Endpoint: POST /api/deals/{id}/refund-cancel
+     */
+    public function refundAndCancel(Request $request, $id)
+    {
+        try {
+            $user = $request->user('sanctum') ?? auth('sanctum')->user() ?? auth()->user();
+
+            $validated = $request->validate([
+                'refund_amount' => 'required|numeric|min:0',
+                'cancellation_fee' => 'nullable|numeric|min:0',
+                'payment_mode' => 'required|string',
+                'transaction_reference' => 'nullable|string|max:255',
+                'bank_name' => 'nullable|string|max:255',
+                'reason' => 'nullable|string|max:500',
+                'notes' => 'nullable|string|max:1000',
+            ]);
+
+            return DB::transaction(function () use ($validated, $user, $request, $id) {
+                $deal = Deal::with(['payments', 'lead'])->findOrFail($id);
+
+                if ($deal->deal_status === 'cancelled') {
+                    return response()->json([
+                        'status' => false,
+                        'message' => "Deal #{$deal->deal_number} is already cancelled.",
+                    ], 400);
+                }
+
+                $refundAmount = (float) $validated['refund_amount'];
+                $cancellationFee = 0.0;
+                $reason = !empty($validated['reason']) ? $validated['reason'] : 'Customer requested deal cancellation';
+
+                // Total received so far from customer
+                $currentPaid = (float) $deal->payments()
+                    ->whereNotIn('status', ['rejected', 'bounced'])
+                    ->where('payment_type', '!=', 'refund')
+                    ->sum('amount');
+
+                if ($refundAmount > $currentPaid) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => "Refund amount (Rs. " . number_format($refundAmount) . ") cannot exceed total paid amount (Rs. " . number_format($currentPaid) . ").",
+                    ], 422);
+                }
+
+                $receiptNo = DealPayment::generateReceiptNumber();
+                $yearMonth = date('Y/m');
+                $invNo = "DAL-REF/{$yearMonth}/" . str_pad($deal->id, 4, '0', STR_PAD_LEFT);
+
+                // 1. Record Refund Entry in deal_payments if refundAmount > 0
+                $refundPayment = null;
+                if ($refundAmount > 0) {
+                    $refundPayment = DealPayment::create([
+                        'receipt_number' => $receiptNo,
+                        'deal_id' => $deal->id,
+                        'lead_id' => $deal->lead_id,
+                        'payment_type' => 'refund',
+                        'amount' => -abs($refundAmount),
+                        'payment_date' => now()->toDateString(),
+                        'payment_mode' => $validated['payment_mode'],
+                        'transaction_reference' => $validated['transaction_reference'] ?: ('REF-' . strtoupper(uniqid())),
+                        'bank_name' => $validated['bank_name'] ?: 'HDFC Bank',
+                        'status' => 'verified',
+                        'notes' => "Deal Cancelled & Money Returned. Refund: Rs. " . number_format($refundAmount) . ($cancellationFee > 0 ? " (Fee Deducted: Rs. " . number_format($cancellationFee) . ")" : "") . ". Reason: " . $reason,
+                        'recorded_by' => $user?->id,
+                        'recorded_by_name' => $user?->name ?? 'Admin',
+                        'verified_by' => $user?->id,
+                        'verified_by_name' => $user?->name ?? 'Admin',
+                        'verified_at' => now(),
+                        'invoice_no' => $invNo,
+                    ]);
+                }
+
+                // 2. Mark Deal as Cancelled & Update Financials
+                $netRetainedPaid = max(0.0, $currentPaid - $refundAmount);
+                $deal->deal_status = 'cancelled';
+                $deal->total_paid = $netRetainedPaid;
+                $deal->balance_due = 0.00;
+                $deal->payment_status = ($netRetainedPaid <= 0) ? 'refunded' : 'partially_refunded';
+
+                $cancellationLog = "[CANCELLED & REFUNDED on " . now()->format('d M Y, h:i A') . "] Refund: Rs. " . number_format($refundAmount) . ($cancellationFee > 0 ? ", Fee Deducted: Rs. " . number_format($cancellationFee) : "") . ", Reason: " . $reason;
+                $deal->notes = trim(($deal->notes ? $deal->notes . "\n" : "") . $cancellationLog);
+                $deal->saveQuietly();
+
+                // 3. Update Connected Lead Status to Lost / Deal Cancelled
+                if ($deal->lead) {
+                    $lostStatus = LeadStatus::where('name', 'like', '%Lost%')->first();
+                    if ($lostStatus) {
+                        $deal->lead->status_id = $lostStatus->id;
+                        $deal->lead->status_name = $lostStatus->name;
+                    } else {
+                        $deal->lead->status_name = 'Deal Cancelled';
+                    }
+                    $deal->lead->saveQuietly();
+
+                    LeadFollowUp::create([
+                        'lead_id' => $deal->lead->id,
+                        'user_id' => $user?->id,
+                        'user_name' => $user?->name ?? 'Admin',
+                        'follow_up_date' => now()->toDateString(),
+                        'follow_up_time' => now()->format('h:i A'),
+                        'type' => 'System / Deal Cancellation',
+                        'outcome' => 'Deal Cancelled / Money Returned',
+                        'notes' => $cancellationLog,
+                    ]);
+                }
+
+                // 4. Update any existing Installment Invoices for this deal to 'Cancelled'
+                InstallmentInvoice::where('deal_id', $deal->id)->update([
+                    'status' => 'Cancelled',
+                ]);
+
+                // 5. If this deal is linked to a CustomerToken, record Credit Note in InstallmentInvoice
+                if ($refundAmount > 0) {
+                    $token = \App\Models\CustomerToken::where('deal_id', $deal->id)
+                        ->orWhere('lead_id', $deal->lead_id)
+                        ->first();
+
+                    if (!$token) {
+                        $existingInv = InstallmentInvoice::where('deal_id', $deal->id)->first();
+                        if ($existingInv && $existingInv->token_id) {
+                            $token = \App\Models\CustomerToken::find($existingInv->token_id);
+                        }
+                    }
+
+                    if ($token) {
+                        InstallmentInvoice::create([
+                            'token_id' => $token->id,
+                            'invoice_number' => $invNo,
+                            'invoice_date' => now()->toDateString(),
+                            'deal_id' => $deal->id,
+                            'lead_id' => $deal->lead_id,
+                            'customer_name' => $deal->customer_name,
+                            'customer_phone' => $deal->customer_phone,
+                            'booked_vehicle' => $deal->model_variant,
+                            'bill_type' => 'Credit Note / Refund Voucher',
+                            'invoice_amount' => -abs($refundAmount),
+                            'tax_amount' => 0.00,
+                            'net_payable' => -abs($refundAmount),
+                            'payment_mode' => $validated['payment_mode'],
+                            'transaction_reference' => $validated['transaction_reference'] ?: ('REF-' . strtoupper(uniqid())),
+                            'payment_status' => 'Refunded',
+                            'status' => 'Cancelled',
+                            'notes' => $cancellationLog,
+                            'created_by' => $user?->id,
+                        ]);
+                        if (method_exists($token, 'recalculateLedger')) {
+                            $token->recalculateLedger();
+                        }
+                    }
+                }
+
+                // 6. Log in Activity Log
+                ActivityLog::create([
+                    'action' => 'TRASH',
+                    'action_type' => 'deal_cancelled_refund',
+                    'user_id' => $user?->id,
+                    'user_name' => $user?->name ?? 'Admin',
+                    'description' => "Deal #{$deal->deal_number} ({$deal->customer_name}) cancelled. Refund of Rs. " . number_format($refundAmount) . " processed.",
+                    'ip_address' => $request->ip(),
+                ]);
+
+                return response()->json([
+                    'status' => true,
+                    'message' => "Deal #{$deal->deal_number} cancelled successfully. Refund of Rs. " . number_format($refundAmount) . " recorded.",
+                    'data' => [
+                        'deal' => $deal->fresh(['payments', 'lead']),
+                        'refund_payment' => $refundPayment,
+                        'voucher' => [
+                            'voucher_number' => $invNo,
+                            'receipt_number' => $receiptNo,
+                            'date' => now()->toDateString(),
+                            'deal_number' => $deal->deal_number,
+                            'customer_name' => $deal->customer_name,
+                            'customer_phone' => $deal->customer_phone,
+                            'vehicle' => $deal->model_variant,
+                            'total_deal_amount' => $deal->total_amount,
+                            'total_received' => $currentPaid,
+                            'cancellation_fee' => $cancellationFee,
+                            'refund_amount' => $refundAmount,
+                            'net_retained' => $netRetainedPaid,
+                            'payment_mode' => $validated['payment_mode'],
+                            'transaction_reference' => $validated['transaction_reference'] ?: 'CASH / PROCESSED',
+                            'reason' => $reason,
+                        ],
+                    ],
+                ]);
+            });
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Validation error',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Throwable $e) {
+            Log::error('DealController@refundAndCancel error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage() ?: 'An error occurred while processing refund and cancellation.',
             ], 500);
         }
     }

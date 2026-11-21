@@ -248,7 +248,7 @@ class ExpenseController extends Controller
     }
 
     /**
-     * Soft delete the specified expense
+     * Permanently delete (hard delete) the specified expense
      */
     public function destroy($id)
     {
@@ -262,11 +262,17 @@ class ExpenseController extends Controller
                 ], 404);
             }
 
+            // Delete attachment file from storage if exists
+            if ($expense->attachment && Storage::disk('public')->exists($expense->attachment)) {
+                Storage::disk('public')->delete($expense->attachment);
+            }
+
+            // Permanently hard delete record from database
             $expense->delete();
 
             return response()->json([
                 'status' => true,
-                'message' => 'Expense deleted successfully',
+                'message' => 'Expense permanently deleted successfully',
             ]);
         } catch (\Throwable $e) {
             Log::error('ExpenseController@destroy error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
@@ -299,7 +305,6 @@ class ExpenseController extends Controller
                     DB::raw('count(expenses.id) as count'),
                     DB::raw('sum(expenses.amount) as total_amount')
                 )
-                ->whereNull('expenses.deleted_at')
                 ->groupBy('expense_categories.id', 'expense_categories.name')
                 ->orderByDesc('total_amount')
                 ->get();

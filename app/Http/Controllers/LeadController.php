@@ -450,7 +450,10 @@ class LeadController extends Controller
                 'assignmentHistories.assignedByUser',
                 'insurances.renewalHistories',
                 'deals.insurances.renewalHistories',
+                'deals.payments',
                 'latestDeal.insurances.renewalHistories',
+                'latestDeal.payments',
+                'payments',
             ])->find($id);
 
             if (!$lead) {

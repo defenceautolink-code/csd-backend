@@ -474,4 +474,39 @@ class TokenBillingController extends Controller
             ],
         ];
     }
+
+    /**
+     * Dedicated KPI Stats API for /invoices/stats
+     */
+    public function getInvoiceStats(Request $request)
+    {
+        try {
+            $totalInvoicesCount = InstallmentInvoice::where('status', 'Active')->count();
+            $totalDealsCount = Deal::whereNotIn('deal_status', ['cancelled'])->count();
+            $totalCollected = (float) InstallmentInvoice::where('status', 'Active')->where('payment_status', 'Paid')->sum('net_payable');
+            $totalDealVolume = (float) Deal::whereNotIn('deal_status', ['cancelled'])->sum('total_amount');
+            if ($totalDealVolume == 0) {
+                $totalDealVolume = (float) CustomerToken::sum('total_deal_amount');
+            }
+            $totalPending = max(0.0, $totalDealVolume - $totalCollected);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Invoice stats retrieved successfully',
+                'data' => [
+                    'total_invoices_count' => $totalInvoicesCount,
+                    'total_collected' => $totalCollected,
+                    'total_deal_volume' => $totalDealVolume,
+                    'total_pending' => $totalPending,
+                    'total_deals_count' => $totalDealsCount,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('TokenBillingController@getInvoiceStats error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch invoice stats: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

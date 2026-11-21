@@ -165,15 +165,20 @@ class Deal extends Model
             ->whereNotIn('status', ['rejected', 'bounced'])
             ->sum('amount');
 
-        $balanceDue = max(0.0, $netAmount - $totalPaid);
-
-        // Determine Payment Status
-        if ($totalPaid <= 0) {
-            $paymentStatus = 'unpaid';
-        } elseif ($totalPaid >= $netAmount && $netAmount > 0) {
-            $paymentStatus = $totalPaid > $netAmount ? 'overpaid' : 'paid';
+        if ($this->deal_status === 'cancelled') {
+            $balanceDue = 0.0;
+            $paymentStatus = ($totalPaid <= 0) ? 'refunded' : 'partially_refunded';
         } else {
-            $paymentStatus = 'partially_paid';
+            $balanceDue = max(0.0, $netAmount - $totalPaid);
+
+            // Determine Payment Status
+            if ($totalPaid <= 0) {
+                $paymentStatus = 'unpaid';
+            } elseif ($totalPaid >= $netAmount && $netAmount > 0) {
+                $paymentStatus = $totalPaid > $netAmount ? 'overpaid' : 'paid';
+            } else {
+                $paymentStatus = 'partially_paid';
+            }
         }
 
         $this->net_amount = $netAmount;

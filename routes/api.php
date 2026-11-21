@@ -88,6 +88,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Brand Master CRUD API
     Route::get('brands/stats', [BrandController::class, 'stats']);
+    Route::post('brands/{id}', [BrandController::class, 'update']); // Multipart logo upload & PUT fallback
     Route::apiResource('brands', BrandController::class);
 
     // Vehicle Model Master CRUD API
@@ -163,6 +164,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('deals/convert-lead/{leadId}', [DealController::class, 'getLeadForDeal']);
     Route::post('deals/convert-lead', [DealController::class, 'convertLead']);
     Route::post('deals/{id}/insurance', [DealController::class, 'addInsurance']);
+    Route::post('deals/{id}/refund-cancel', [DealController::class, 'refundAndCancel']);
     Route::post('deals/{id}/restore', [DealController::class, 'restore']);
     Route::delete('deals/{id}/force', [DealController::class, 'forceDelete']);
     Route::get('deals/{dealId}/payments', [DealPaymentController::class, 'getByDeal']);

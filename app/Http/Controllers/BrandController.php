@@ -187,8 +187,8 @@ class BrandController extends Controller
             }
 
             $request->validate([
-                'name' => 'required|string|max:255',
-                'status' => 'required|string|in:Active,Inactive,active,inactive',
+                'name' => 'sometimes|required|string|max:255',
+                'status' => 'sometimes|required|string|in:Active,Inactive,active,inactive',
             ]);
 
             // Process vehicle_type
@@ -217,10 +217,10 @@ class BrandController extends Controller
             }
 
             $brand->update([
-                'name' => $request->name,
+                'name' => $request->filled('name') ? $request->name : $brand->name,
                 'vehicle_type' => $vehicleType,
                 'logo' => $logoPath,
-                'status' => ucfirst(strtolower($request->status)),
+                'status' => $request->filled('status') ? ucfirst(strtolower($request->status)) : $brand->status,
             ]);
 
             return response()->json([

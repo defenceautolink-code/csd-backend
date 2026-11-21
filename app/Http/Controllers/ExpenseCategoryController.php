@@ -232,7 +232,7 @@ class ExpenseCategoryController extends Controller
     }
 
     /**
-     * Soft delete the specified expense category
+     * Permanently delete (hard delete) the specified expense category
      */
     public function destroy($id)
     {
@@ -246,12 +246,28 @@ class ExpenseCategoryController extends Controller
                 ], 404);
             }
 
+            // Check if any expenses are linked to this category
+            $linkedExpensesCount = $category->expenses()->count();
+            if ($linkedExpensesCount > 0) {
+                return response()->json([
+                    'status' => false,
+                    'message' => "Cannot delete category: {$linkedExpensesCount} linked expense(s) exist. Please delete or reassign the linked expenses first.",
+                ], 400);
+            }
+
+            // Permanently hard delete record from database
             $category->delete();
 
             return response()->json([
                 'status' => true,
-                'message' => 'Expense category deleted successfully',
+                'message' => 'Expense category permanently deleted successfully',
             ]);
+        } catch (\Illuminate\Database\QueryException $e) {
+            Log::warning('ExpenseCategoryController@destroy foreign key constraint: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Cannot delete category: linked expenses exist. Please delete or reassign the linked expenses first.',
+            ], 400);
         } catch (\Throwable $e) {
             Log::error('ExpenseCategoryController@destroy error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json([
