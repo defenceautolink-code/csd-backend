@@ -9,6 +9,9 @@ class ContactInquiryController extends Controller
 {
     public function index(Request $request)
     {
+        // Auto-purge any soft-deleted records from DB to ensure clean table
+        ContactInquiry::onlyTrashed()->forceDelete();
+
         $query = ContactInquiry::latest('id');
 
         if ($request->filled('search')) {
@@ -59,12 +62,12 @@ class ContactInquiryController extends Controller
 
     public function destroy($id)
     {
-        $inquiry = ContactInquiry::findOrFail($id);
-        $inquiry->delete();
+        $inquiry = ContactInquiry::withTrashed()->findOrFail($id);
+        $inquiry->forceDelete();
 
         return response()->json([
             'status' => true,
-            'message' => 'Contact inquiry deleted successfully.',
+            'message' => 'Contact inquiry permanently deleted successfully.',
         ]);
     }
 }
