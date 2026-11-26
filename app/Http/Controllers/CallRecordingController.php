@@ -467,16 +467,56 @@ class CallRecordingController extends Controller
                 return strcasecmp((string) $a['name'], (string) $b['name']);
             })->values();
 
+            // KPI cards always reflect All-Dates totals (unaffected by From/To Date filter)
+            $allKpiFuGrouped = collect();
+            $allKpiRecGrouped = collect();
+            if (!empty($staffIds)) {
+                $allKpiFuGrouped = LeadFollowUp::query()
+                    ->whereIn('user_id', $staffIds)
+                    ->where(function ($q) {
+                        $q->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
+                    })
+                    ->selectRaw('user_id, DATE(follow_up_date) as day_date, COUNT(*) as total_follow_ups, SUM(CASE WHEN LOWER(COALESCE(type, "")) LIKE "%call%" THEN 1 ELSE 0 END) as call_follow_ups')
+                    ->groupByRaw('user_id, DATE(follow_up_date)')
+                    ->get();
+
+                $allKpiRecGrouped = CallRecording::query()
+                    ->whereIn('user_id', $staffIds)
+                    ->selectRaw('user_id, DATE(recording_date) as day_date, COUNT(*) as recordings_uploaded, SUM(CASE WHEN review_status = "pending" THEN 1 ELSE 0 END) as pending_count, SUM(CASE WHEN review_status = "verified" THEN 1 ELSE 0 END) as verified_count, SUM(CASE WHEN review_status = "flagged" THEN 1 ELSE 0 END) as flagged_count')
+                    ->groupByRaw('user_id, DATE(recording_date)')
+                    ->get();
+            }
+
+            $kpiFuByKey = $allKpiFuGrouped->keyBy(fn ($r) => $r->user_id . '_' . $r->day_date);
+            $kpiRecByKey = $allKpiRecGrouped->keyBy(fn ($r) => $r->user_id . '_' . $r->day_date);
+            $allKpiKeys = $kpiFuByKey->keys()->merge($kpiRecByKey->keys())->unique();
+
+            $kpiTotalMissing = 0;
+            $kpiMissingStaffIds = [];
+            foreach ($allKpiKeys as $key) {
+                $fuItem = $kpiFuByKey->get($key);
+                $recItem = $kpiRecByKey->get($key);
+                $calls = (int) ($fuItem->call_follow_ups ?? 0);
+                $recs = (int) ($recItem->recordings_uploaded ?? 0);
+                if ($calls > $recs) {
+                    $kpiTotalMissing += ($calls - $recs);
+                    $uid = $fuItem->user_id ?? $recItem->user_id;
+                    if ($uid) {
+                        $kpiMissingStaffIds[$uid] = true;
+                    }
+                }
+            }
+
             $kpis = [
                 'total_staff' => $staffUsers->count(),
-                'total_follow_ups' => $rows->sum('total_follow_ups'),
-                'total_call_follow_ups' => $rows->sum('call_follow_ups'),
-                'total_recordings' => $rows->sum('recordings_uploaded'),
-                'total_missing' => $rows->sum('missing_count'),
-                'staff_with_missing' => $rows->where('missing_count', '>', 0)->pluck('user_id')->unique()->count(),
-                'pending_review' => $rows->sum('pending_count'),
-                'verified_count' => $rows->sum('verified_count'),
-                'flagged_count' => $rows->sum('flagged_count'),
+                'total_follow_ups' => (int) $allKpiFuGrouped->sum('total_follow_ups'),
+                'total_call_follow_ups' => (int) $allKpiFuGrouped->sum('call_follow_ups'),
+                'total_recordings' => (int) $allKpiRecGrouped->sum('recordings_uploaded'),
+                'total_missing' => $kpiTotalMissing,
+                'staff_with_missing' => count($kpiMissingStaffIds),
+                'pending_review' => (int) $allKpiRecGrouped->sum('pending_count'),
+                'verified_count' => (int) $allKpiRecGrouped->sum('verified_count'),
+                'flagged_count' => (int) $allKpiRecGrouped->sum('flagged_count'),
             ];
 
             return response()->json([
@@ -839,6 +879,77 @@ class CallRecordingController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => 'Failed to delete call recording.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete all call recordings (and their audio files) older than 1 month
+     * (recording_date strictly before today minus 1 month, e.g. < 2026-10-26 on 2026-11-26).
+     * Supports dry_run=true to preview count before confirming deletion.
+     */
+    public function deleteOlderThanMonth(Request $request)
+    {
+        try {
+            $user = $this->resolveAuthUser($request);
+            if (!$this->isAdminOrManager($user)) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Only Admin or Sales Manager can delete old call recordings.',
+                ], 403);
+            }
+
+            $cutoffDate = Carbon::today()->subMonthNoOverflow()->toDateString();
+
+            $query = CallRecording::query()->where(function ($q) use ($cutoffDate) {
+                $q->whereDate('recording_date', '<', $cutoffDate)
+                  ->orWhere(function ($sq) use ($cutoffDate) {
+                      $sq->whereNull('recording_date')
+                         ->whereDate('created_at', '<', $cutoffDate);
+                  });
+            });
+
+            if ($request->boolean('dry_run')) {
+                $count = (clone $query)->count();
+                return response()->json([
+                    'status' => true,
+                    'cutoff_date' => $cutoffDate,
+                    'count' => $count,
+                ]);
+            }
+
+            $recordings = $query->get();
+            $deletedCount = 0;
+
+            foreach ($recordings as $recording) {
+                $relative = ltrim((string) $recording->file_path, '/');
+                if ($relative !== '') {
+                    $fullPath = public_path($relative);
+                    if (File::exists($fullPath)) {
+                        File::delete($fullPath);
+                    }
+                    $altPath = storage_path('app/public/' . $relative);
+                    if (File::exists($altPath)) {
+                        File::delete($altPath);
+                    }
+                }
+                $recording->forceDelete();
+                $deletedCount++;
+            }
+
+            return response()->json([
+                'status' => true,
+                'cutoff_date' => $cutoffDate,
+                'deleted_count' => $deletedCount,
+                'message' => $deletedCount > 0
+                    ? "Deleted {$deletedCount} call recording(s) recorded before {$cutoffDate}."
+                    : "No call recordings found before {$cutoffDate}.",
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('CallRecordingController@deleteOlderThanMonth error: ' . $e->getMessage());
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to delete old call recordings.',
             ], 500);
         }
     }

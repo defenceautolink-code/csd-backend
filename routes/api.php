@@ -144,6 +144,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/summary', [CallRecordingController::class, 'dailySummary']);
         Route::get('/staff/{userId}', [CallRecordingController::class, 'staffDetail']);
         Route::post('/', [CallRecordingController::class, 'store']);
+        Route::post('/delete-older-than-month', [CallRecordingController::class, 'deleteOlderThanMonth']);
         Route::get('/{id}/stream', [CallRecordingController::class, 'stream']);
         Route::post('/{id}/review', [CallRecordingController::class, 'review']);
         Route::delete('/{id}', [CallRecordingController::class, 'destroy']);

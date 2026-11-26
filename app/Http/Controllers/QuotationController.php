@@ -65,6 +65,7 @@ class QuotationController extends Controller
                     'brand_id' => $lead->brand_id,
                     'brand_name' => $lead->brand_name,
                     'model_variant' => $lead->model_variant,
+                    'budget' => $lead->budget,
                     'suggested_subject' => $subject,
                     'suggested_item' => [
                         'name' => $lead->model_variant ?: ($lead->brand_name ?: 'Vehicle Purchase'),
@@ -161,6 +162,7 @@ class QuotationController extends Controller
                         'brand' => $lead->brand,
                         'model_variant' => $lead->model_variant,
                         'priority' => $lead->priority,
+                        'budget' => $lead->budget,
                         'purchase_timeline' => $lead->purchase_timeline,
                         'source_id' => $lead->source_id,
                         'source_name' => $lead->source_name,
