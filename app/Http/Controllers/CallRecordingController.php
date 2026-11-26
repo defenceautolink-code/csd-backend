@@ -399,38 +399,57 @@ class CallRecordingController extends Controller
                 ];
             };
 
-            $rows = collect();
-            foreach ($staffUsers as $staff) {
-                $userFuMap = $fuByUser->get($staff->id, collect());
-                $userRecMap = $recByUser->get($staff->id, collect());
+            $todayStr = Carbon::today()->toDateString();
 
-                if ($isSingleDay) {
+            if ($isSingleDay) {
+                $targetDates = collect([$fromDate]);
+            } else {
+                // Gather all active dates across all staff in this date range so every staff row has a real date
+                $allFuDatesQuery = LeadFollowUp::query()
+                    ->where(function ($q) {
+                        $q->whereNull('record_status')->orWhere('record_status', '!=', 'deleted');
+                    });
+                $applyFollowUpDate($allFuDatesQuery);
+                $allFuDates = $allFuDatesQuery
+                    ->selectRaw('DISTINCT DATE(follow_up_date) as day_date')
+                    ->pluck('day_date');
+
+                $allRecDatesQuery = CallRecording::query();
+                $applyRecordingDate($allRecDatesQuery);
+                $allRecDates = $allRecDatesQuery
+                    ->selectRaw('DISTINCT DATE(recording_date) as day_date')
+                    ->pluck('day_date');
+
+                $targetDates = $allFuDates
+                    ->merge($allRecDates)
+                    ->merge($fuGrouped->pluck('day_date'))
+                    ->merge($recGrouped->pluck('day_date'))
+                    ->filter()
+                    ->unique();
+
+                if ((!$fromDate || $todayStr >= $fromDate) && (!$toDate || $todayStr <= $toDate)) {
+                    $targetDates = $targetDates->push($todayStr)->unique();
+                }
+
+                if ($targetDates->isEmpty()) {
+                    $targetDates = collect([$fromDate ?: ($toDate ?: $todayStr)]);
+                }
+
+                $targetDates = $targetDates->sortDesc()->values();
+            }
+
+            $rows = collect();
+            foreach ($targetDates as $dayDate) {
+                foreach ($staffUsers as $staff) {
+                    $userFuMap = $fuByUser->get($staff->id, collect());
+                    $userRecMap = $recByUser->get($staff->id, collect());
+
                     $rows->push($buildRow(
                         $staff,
-                        $fromDate,
-                        $userFuMap->get($fromDate),
-                        $userRecMap->get($fromDate)
+                        $dayDate,
+                        $userFuMap->get($dayDate),
+                        $userRecMap->get($dayDate)
                     ));
-                } else {
-                    $dates = $userFuMap->keys()
-                        ->merge($userRecMap->keys())
-                        ->filter()
-                        ->unique()
-                        ->sortDesc()
-                        ->values();
-
-                    if ($dates->isEmpty()) {
-                        $rows->push($buildRow($staff, null, null, null));
-                    } else {
-                        foreach ($dates as $dayDate) {
-                            $rows->push($buildRow(
-                                $staff,
-                                $dayDate,
-                                $userFuMap->get($dayDate),
-                                $userRecMap->get($dayDate)
-                            ));
-                        }
-                    }
                 }
             }
 
