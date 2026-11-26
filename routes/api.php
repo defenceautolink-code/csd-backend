@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\BrandController;
+use App\Http\Controllers\CallRecordingController;
 use App\Http\Controllers\FollowUpController;
 use App\Http\Controllers\LeadAssignmentHistoryController;
 use App\Http\Controllers\LeadController;
@@ -136,6 +137,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('follow-ups/{id}/restore', [FollowUpController::class, 'restore']);
     Route::delete('follow-ups/{id}/force', [FollowUpController::class, 'forceDelete']);
     Route::apiResource('follow-ups', FollowUpController::class);
+
+    // Daily Call Recordings Upload & Audit APIs (Sales Executive, Receptionist, Sales Manager, Super Admin)
+    Route::prefix('call-recordings')->group(function () {
+        Route::get('/', [CallRecordingController::class, 'index']);
+        Route::get('/summary', [CallRecordingController::class, 'dailySummary']);
+        Route::get('/staff/{userId}', [CallRecordingController::class, 'staffDetail']);
+        Route::post('/', [CallRecordingController::class, 'store']);
+        Route::get('/{id}/stream', [CallRecordingController::class, 'stream']);
+        Route::post('/{id}/review', [CallRecordingController::class, 'review']);
+        Route::delete('/{id}', [CallRecordingController::class, 'destroy']);
+    });
 
     // Follow-up Discount Approval Workflow API (Admin & Sales Manager)
     Route::get('discount-approvals/pending', [DiscountApprovalController::class, 'pending']);
